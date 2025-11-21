@@ -1,7 +1,3 @@
-doc/analyse/dist
-.DS_Store
-*/.DS_Store
-doc/Analyse.pdf
 
 target/
 target/*
@@ -240,6 +236,4 @@ $RECYCLE.BIN/
 *.msp
 
 # Windows shortcuts
-*.lnksae302.png
 .vscode
-players.csv
