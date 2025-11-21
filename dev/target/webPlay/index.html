@@ -1,0 +1,147 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>My WebPlaylist</title>
+    <style>
+        body { font-family: sans-serif; background: #1a1a1a; color: #fff; display: flex; }
+
+        .sidebar { width: 30%; height: 100vh; overflow-y: auto; border-right: 1px solid #333; }
+        .sidebar ul { list-style: none; padding: 0; }
+        .sidebar li { padding: 15px; border-bottom: 1px solid #333; cursor: pointer; transition: 0.2s; }
+        .sidebar li:hover { background: #333; color: #4CAF50; }
+
+        .main-content { width: 70%; display: flex; justify-content: center; align-items: center; height: 100vh; }
+    </style>
+</head>
+<body>
+
+<div class="sidebar">
+    <ul id="playlist-ui">
+        </ul>
+</div>
+
+<div class="main-content">
+    <div id="yt-player"></div>
+</div>
+
+<script>
+    var tag = document.createElement('script');
+    tag.src = "https://www.youtube.com/iframe_api";
+    var firstScriptTag = document.getElementsByTagName('script')[0];
+    firstScriptTag.parentNode.insertBefore(tag, firstScriptTag);
+
+    var player;
+    function onYouTubeIframeAPIReady() {
+        player = new YT.Player('yt-player', {
+            height: '390',
+            width: '640',
+            events: {
+                'onReady': onPlayerReady
+            }
+        });
+    }
+
+    function onPlayerReady(event) {
+        console.log("Player Ready");
+    }
+
+    // 3. Fetch Data from your Servlet
+    fetch('PlaylistServlet')
+        .then(response => response.json())
+        .then(songs => {
+            const list = document.getElementById('playlist-ui');
+
+            songs.forEach(song => {
+                const li = document.createElement('li');
+                li.textContent = `${song.artist} - ${song.title}`;
+
+                li.onclick = () => {
+                    if(player && player.loadVideoById) {
+                        player.loadVideoById(song.videoId);
+                    }
+                };
+
+                list.appendChild(li);
+            });
+        });
+</script>
+
+<div class="add-btn-container" style="position: absolute; bottom: 0; width: 30%; background: #222;">
+    <button onclick="openModal()" style="width: 100%; padding: 15px; background: #4CAF50; color: white; border: none; cursor: pointer; font-size: 18px;">
+        + Add Music
+    </button>
+</div>
+
+<div id="addModal" style="display:none; position: fixed; z-index: 1; left: 0; top: 0; width: 100%; height: 100%; background-color: rgba(0,0,0,0.8);">
+    <div style="background-color: #333; margin: 15% auto; padding: 20px; border: 1px solid #888; width: 400px; color: white; display: flex; flex-direction: column; gap: 10px; text-align: center;">
+
+        <h3>Import Music</h3>
+        <p style="color: #aaa; font-size: 12px;">Paste a Video URL or a Playlist URL</p>
+
+        <input type="text" id="inputUrl" placeholder="https://www.youtube.com/..." style="padding: 10px; width: 90%;">
+        <button onclick="submitSong()" style="padding: 10px; background: #4CAF50; color: white; border: none; cursor: pointer;">
+            Auto-Import
+        </button>
+        <button onclick="closeModal()" style="padding: 10px; background: #f44336; color: white; border: none; cursor: pointer;">
+            Cancel
+        </button>
+    </div>
+</div>
+
+<script>
+    function openModal() {
+        document.getElementById('addModal').style.display = 'block';
+    }
+
+    function closeModal() {
+        document.getElementById('addModal').style.display = 'none';
+    }
+
+    function extractVideoId(url) {
+        var regExp = /^.*(youtu.be\/|v\/|u\/\w\/|embed\/|watch\?v=|\&v=)([^#\&\?]*).*/;
+        var match = url.match(regExp);
+        return (match && match[2].length == 11) ? match[2] : null;
+    }
+
+    function submitSong() {
+        const url = document.getElementById('inputUrl').value;
+        const btn = document.querySelector('button[onclick="submitSong()"]');
+
+        const listMatch = url.match(/[?&]list=([^#\&\?]+)/);
+        const playlistId = listMatch ? listMatch[1] : null;
+
+        const videoId = !playlistId ? extractVideoId(url) : null;
+
+        if (!videoId && !playlistId) {
+            alert("Invalid URL");
+            return;
+        }
+
+        btn.innerText = "Talking to Google...";
+        btn.disabled = true;
+
+        fetch('AddServlet', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                videoId: videoId,       // Can be null if it's a playlist
+                playlistId: playlistId, // Can be null if it's a song
+                title: null,            // Java will find this
+                artist: null            // Java will find this
+            })
+        })
+        .then(response => response.text())
+        .then(data => {
+            alert(data);
+            location.reload();
+        })
+        .catch(err => {
+            alert("Error: " + err);
+            btn.innerText = "Auto-Import";
+            btn.disabled = false;
+        });
+    }
+</script>
+
+</body>
+</html>
