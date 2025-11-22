@@ -25,21 +25,21 @@ function onPlayerReady(event) {
 /* Playlist & Search Logic                          */
 /* -------------------------------------------------------------------------- */
 
-// Initial Load
 document.addEventListener('DOMContentLoaded', () => {
     fetchAndRender('PlaylistServlet');
 });
 
 let searchTimeout;
 
-// Debounce function to prevent spamming the server
 function handleSearch() {
     clearTimeout(searchTimeout);
-    const query = document.getElementById('searchInput').value.trim();
+    const input = document.getElementById('searchInput');
+    if (!input) return;
+
+    const query = input.value.trim();
 
     searchTimeout = setTimeout(() => {
         if (query.length === 0) {
-            // If empty, load all songs
             fetchAndRender('PlaylistServlet');
         } else {
             fetchAndRender(`SearchServlet?q=${encodeURIComponent(query)}`);
@@ -52,6 +52,8 @@ function fetchAndRender(url) {
         .then(response => response.json())
         .then(songs => {
             const container = document.getElementById('playlist-ui');
+            if (!container) return;
+
             container.innerHTML = '';
 
             if(songs.length === 0) {
@@ -60,11 +62,9 @@ function fetchAndRender(url) {
             }
 
             songs.forEach(song => {
-                // Create visual elements
                 const div = document.createElement('div');
                 div.className = 'song-item';
 
-                // Generate Thumbnail URL from YouTube ID
                 const thumbUrl = `https://img.youtube.com/vi/${song.videoId}/default.jpg`;
 
                 div.innerHTML = `
@@ -93,26 +93,32 @@ function fetchAndRender(url) {
 /* -------------------------------------------------------------------------- */
 
 function openModal() {
-    document.getElementById('addModal').style.display = 'block';
-    document.getElementById('inputUrl').focus();
+    const modal = document.getElementById('addModal');
+    if (modal) {
+        modal.style.display = 'block';
+        const input = document.getElementById('inputUrl');
+        if (input) input.focus();
+    }
 
-    document.getElementById('loadingBar').style.display = 'none';
+    // Reset load bar
+    const loaderBar = document.querySelector('.loader-bar');
+    const loadingBar = document.getElementById('loadingBar');
     const statusText = document.getElementById('loadingStatus');
+
+    if (loadingBar) loadingBar.style.display = 'none';
     if (statusText) statusText.innerText = '';
 
-    // Reset bar
-    const bar = document.querySelector('.loader-bar');
-    if (bar) {
-        bar.classList.remove('determinate');
-        bar.style.width = '50%';
+    if (loaderBar) {
+        loaderBar.classList.remove('determinate');
+        loaderBar.style.width = '50%';
     }
 }
 
 function closeModal() {
-    document.getElementById('addModal').style.display = 'none';
+    const modal = document.getElementById('addModal');
+    if (modal) modal.style.display = 'none';
 }
 
-// Close modal if clicking outside the box
 window.onclick = function(event) {
     const modal = document.getElementById('addModal');
     if (event.target == modal) {
@@ -127,10 +133,20 @@ function extractVideoId(url) {
 }
 
 async function submitSong() {
-    const url = document.getElementById('inputUrl').value;
     const btn = document.getElementById('submitBtn');
+    const inputElement = document.getElementById('inputUrl');
     const loaderContainer = document.getElementById('loadingBar');
     const loaderBar = document.querySelector('.loader-bar');
+    const statusText = document.getElementById('loadingStatus');
+
+    const originalText = btn ? btn.innerText : "Import";
+
+    if (!inputElement) {
+        alert("Error: Input field missing.");
+        return;
+    }
+    const url = inputElement.value;
+
     const listMatch = url.match(/[?&]list=([^#\&\?]+)/);
     const playlistId = listMatch ? listMatch[1] : null;
     const videoId = !playlistId ? extractVideoId(url) : null;
@@ -140,14 +156,19 @@ async function submitSong() {
         return;
     }
 
-    const originalText = btn.innerText;
-    btn.innerText = "Processing...";
-    btn.disabled = true;
+    // 3. UI Updates
+    if (btn) {
+        btn.innerText = "Processing...";
+        btn.disabled = true;
+    }
 
-    loaderContainer.style.display = 'block';
-    loaderBar.classList.remove('determinate');
-    loaderBar.style.width = '50%';
+    if (loaderContainer) loaderContainer.style.display = 'block';
+    if (loaderBar) {
+        loaderBar.classList.remove('determinate');
+        loaderBar.style.width = '50%';
+    }
 
+    // 4. Network Request
     try {
         const response = await fetch('AddServlet', {
             method: 'POST',
@@ -158,12 +179,16 @@ async function submitSong() {
             })
         });
 
+        if (!response.body) throw new Error("ReadableStream not supported.");
+
         const reader = response.body.getReader();
         const decoder = new TextDecoder("utf-8");
 
-        loaderBar.classList.add('determinate');
-        loaderBar.style.width = '0%';
-        if(statusText) statusText.style.display = 'block';
+        if (loaderBar) {
+            loaderBar.classList.add('determinate');
+            loaderBar.style.width = '0%';
+        }
+        if (statusText) statusText.style.display = 'block';
 
         while (true) {
             const { done, value } = await reader.read();
@@ -175,16 +200,14 @@ async function submitSong() {
             for (const line of lines) {
                 if (!line.trim()) continue;
 
-                // Expected format from Java: "PROGRESS:5/20" or "DONE:Imported 50 songs"
                 if (line.startsWith("PROGRESS:")) {
                     const parts = line.split(":")[1].split("/");
                     const current = parseInt(parts[0]);
                     const total = parseInt(parts[1]);
 
                     const percent = (current / total) * 100;
-                    loaderBar.style.width = percent + "%";
-
-                    if(statusText) statusText.innerText = `Importing ${current} of ${total}...`;
+                    if (loaderBar) loaderBar.style.width = percent + "%";
+                    if (statusText) statusText.innerText = `Importing ${current} of ${total}...`;
                 }
                 else if (line.startsWith("DONE:")) {
                     alert(line.split(":")[1]);
@@ -196,15 +219,19 @@ async function submitSong() {
         }
 
         closeModal();
-        document.getElementById('inputUrl').value = '';
+        if (inputElement) inputElement.value = '';
         fetchAndRender('PlaylistServlet');
 
     } catch (err) {
+        console.error("Catch Block Error:", err);
         alert("Error: " + err.message);
     } finally {
-        btn.innerText = originalText;
-        btn.disabled = false;
-        loaderContainer.style.display = 'none';
-        if(statusText) statusText.style.display = 'none';
+        if (btn) {
+            btn.innerText = originalText;
+            btn.disabled = false;
+        }
+
+        if (loaderContainer) loaderContainer.style.display = 'none';
+        if (statusText) statusText.style.display = 'none';
     }
 }
