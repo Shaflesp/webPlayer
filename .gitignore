@@ -2,6 +2,7 @@ dev/target/
 dev/target/*
 target/
 target/*
+dev/src/main/resources/keys.csv
 
 # Created by https://www.toptal.com/developers/gitignore/api/macos,linux,intellij,visualstudiocode,windows,java
 # Edit at https://www.toptal.com/developers/gitignore?templates=macos,linux,intellij,visualstudiocode,windows,java
