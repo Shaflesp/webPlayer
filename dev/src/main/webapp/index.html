@@ -1,147 +1,67 @@
 <!DOCTYPE html>
-<html>
+<html lang="fr,en">
 <head>
-    <title>My WebPlaylist</title>
-    <style>
-        body { font-family: sans-serif; background: #1a1a1a; color: #fff; display: flex; }
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>webPlayer</title>
 
-        .sidebar { width: 30%; height: 100vh; overflow-y: auto; border-right: 1px solid #333; }
-        .sidebar ul { list-style: none; padding: 0; }
-        .sidebar li { padding: 15px; border-bottom: 1px solid #333; cursor: pointer; transition: 0.2s; }
-        .sidebar li:hover { background: #333; color: #4CAF50; }
+    <!-- Google Fonts -->
+    <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@300;400;500;700&display=swap" rel="stylesheet">
+    <!-- FontAwesome for Icons -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
 
-        .main-content { width: 70%; display: flex; justify-content: center; align-items: center; height: 100vh; }
-    </style>
+    <link rel="stylesheet" href="css/style.css">
 </head>
 <body>
 
+<!-- Sidebar -->
 <div class="sidebar">
-    <ul id="playlist-ui">
-        </ul>
-</div>
+    <div class="sidebar-header">
+        <div class="brand">
+            <i class="fa-brands fa-youtube" style="color: red;"></i> WebPlaylist
+        </div>
+        <div class="search-container">
+            <i class="fas fa-search"></i>
+            <input type="text" id="searchInput" placeholder="Search library..." onkeyup="handleSearch()">
+        </div>
+    </div>
 
-<div class="main-content">
-    <div id="yt-player"></div>
-</div>
+    <div class="playlist-container">
+        <div id="playlist-ui">
+            <!-- Songs injected here via JS -->
+        </div>
+    </div>
 
-<script>
-    var tag = document.createElement('script');
-    tag.src = "https://www.youtube.com/iframe_api";
-    var firstScriptTag = document.getElementsByTagName('script')[0];
-    firstScriptTag.parentNode.insertBefore(tag, firstScriptTag);
-
-    var player;
-    function onYouTubeIframeAPIReady() {
-        player = new YT.Player('yt-player', {
-            height: '390',
-            width: '640',
-            events: {
-                'onReady': onPlayerReady
-            }
-        });
-    }
-
-    function onPlayerReady(event) {
-        console.log("Player Ready");
-    }
-
-    // 3. Fetch Data from your Servlet
-    fetch('PlaylistServlet')
-        .then(response => response.json())
-        .then(songs => {
-            const list = document.getElementById('playlist-ui');
-
-            songs.forEach(song => {
-                const li = document.createElement('li');
-                li.textContent = `${song.artist} - ${song.title}`;
-
-                li.onclick = () => {
-                    if(player && player.loadVideoById) {
-                        player.loadVideoById(song.videoId);
-                    }
-                };
-
-                list.appendChild(li);
-            });
-        });
-</script>
-
-<div class="add-btn-container" style="position: absolute; bottom: 0; width: 30%; background: #222;">
-    <button onclick="openModal()" style="width: 100%; padding: 15px; background: #4CAF50; color: white; border: none; cursor: pointer; font-size: 18px;">
-        + Add Music
-    </button>
-</div>
-
-<div id="addModal" style="display:none; position: fixed; z-index: 1; left: 0; top: 0; width: 100%; height: 100%; background-color: rgba(0,0,0,0.8);">
-    <div style="background-color: #333; margin: 15% auto; padding: 20px; border: 1px solid #888; width: 400px; color: white; display: flex; flex-direction: column; gap: 10px; text-align: center;">
-
-        <h3>Import Music</h3>
-        <p style="color: #aaa; font-size: 12px;">Paste a Video URL or a Playlist URL</p>
-
-        <input type="text" id="inputUrl" placeholder="https://www.youtube.com/..." style="padding: 10px; width: 90%;">
-        <button onclick="submitSong()" style="padding: 10px; background: #4CAF50; color: white; border: none; cursor: pointer;">
-            Auto-Import
-        </button>
-        <button onclick="closeModal()" style="padding: 10px; background: #f44336; color: white; border: none; cursor: pointer;">
-            Cancel
+    <div class="sidebar-footer">
+        <button class="add-btn" onclick="openModal()">
+            <i class="fas fa-plus"></i> Add Music
         </button>
     </div>
 </div>
 
-<script>
-    function openModal() {
-        document.getElementById('addModal').style.display = 'block';
-    }
+<!-- Main  -->
+<div class="main-content">
+    <div class="video-wrapper">
+        <div id="yt-player"></div>
+    </div>
+</div>
 
-    function closeModal() {
-        document.getElementById('addModal').style.display = 'none';
-    }
+<!-- Add Modal -->
+<div id="addModal" class="modal-overlay">
+    <div class="modal-box">
+        <h3>Import Music</h3>
+        <p>Paste a YouTube Video or Playlist URL to add it to your library.</p>
 
-    function extractVideoId(url) {
-        var regExp = /^.*(youtu.be\/|v\/|u\/\w\/|embed\/|watch\?v=|\&v=)([^#\&\?]*).*/;
-        var match = url.match(regExp);
-        return (match && match[2].length == 11) ? match[2] : null;
-    }
+        <input type="text" id="inputUrl" class="modal-input" placeholder="https://www.youtube.com/watch?v=...">
 
-    function submitSong() {
-        const url = document.getElementById('inputUrl').value;
-        const btn = document.querySelector('button[onclick="submitSong()"]');
+        <div class="modal-actions">
+            <button id="submitBtn" onclick="submitSong()" class="btn-primary">Auto-Import</button>
+            <button onclick="closeModal()" class="btn-secondary">Cancel</button>
+        </div>
+    </div>
+</div>
 
-        const listMatch = url.match(/[?&]list=([^#\&\?]+)/);
-        const playlistId = listMatch ? listMatch[1] : null;
-
-        const videoId = !playlistId ? extractVideoId(url) : null;
-
-        if (!videoId && !playlistId) {
-            alert("Invalid URL");
-            return;
-        }
-
-        btn.innerText = "Talking to Google...";
-        btn.disabled = true;
-
-        fetch('AddServlet', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                videoId: videoId,       // Can be null if it's a playlist
-                playlistId: playlistId, // Can be null if it's a song
-                title: null,            // Java will find this
-                artist: null            // Java will find this
-            })
-        })
-        .then(response => response.text())
-        .then(data => {
-            alert(data);
-            location.reload();
-        })
-        .catch(err => {
-            alert("Error: " + err);
-            btn.innerText = "Auto-Import";
-            btn.disabled = false;
-        });
-    }
-</script>
+<script src="/js/script.js"></script>
 
 </body>
 </html>
