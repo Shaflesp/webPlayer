@@ -18,8 +18,8 @@ import jakarta.servlet.annotation.WebServlet;
 public class AddServlet extends HttpServlet {
 
     private final String DB_URL = "jdbc:postgresql://localhost:5432/postgres";
-    private final String USER = "postgres";
-    private final String PASS = "password";
+    private final String DB_USER = "postgres";
+    private final String DB_PASS = "password";
 
     //KeyManager key=new KeyManager()
     private final String API_KEY = KeyManager.get("youtubeDataV3");
@@ -29,35 +29,48 @@ public class AddServlet extends HttpServlet {
 
     protected void doPost(HttpServletRequest request, HttpServletResponse response) throws IOException {
         request.setCharacterEncoding("UTF-8");
-        BufferedReader reader = request.getReader();
-        Gson gson = new Gson();
-        RequestData reqData = gson.fromJson(reader, RequestData.class);
+        response.setContentType("text/plain");
+        response.setCharacterEncoding("UTF-8");
+        response.setBufferSize(0);
+
+        PrintWriter out = response.getWriter();
+        Connection conn = null;
 
         try {
+            BufferedReader reader = request.getReader();
+            Gson gson = new Gson();
+            RequestData reqData = gson.fromJson(reader, RequestData.class);
+
             Class.forName("org.postgresql.Driver");
-            try (Connection conn = DriverManager.getConnection(DB_URL, USER, PASS)) {
+            conn = DriverManager.getConnection(DB_URL, DB_USER, DB_PASS);
 
-                int addedCount = 0;
+            int addedCount = 0;
 
-                if (reqData.playlistId != null && !reqData.playlistId.isEmpty()) {
-                    addedCount = processPlaylist(reqData.playlistId, conn);
-                }
-                else if (reqData.videoId != null) {
-                    addedCount = processSingleVideo(reqData.videoId, conn);
-                }
-
-                response.getWriter().write("Processed. Added " + addedCount + " new songs.");
+            if (reqData.playlistId != null && !reqData.playlistId.isEmpty()) {
+                addedCount = processPlaylist(reqData.playlistId, conn, (current, total) -> {
+                    out.println("PROGRESS:" + current + "/" + total);
+                    out.flush();
+                });
+                out.println("DONE:Playlist Processed. Added " + addedCount + " songs.");
+            }
+            else if (reqData.videoId != null) {
+                addedCount = processSingleVideo(reqData.videoId, conn);
+                if(addedCount > 0) out.println("DONE:Song Added");
+                else out.println("ERROR:Could not add song (Private or Invalid)");
             }
         } catch (Exception e) {
             e.printStackTrace();
-            response.setStatus(500);
-            response.getWriter().write("Error: " + e.getMessage());
+            out.println("ERROR:" + e.getMessage());
+        } finally {
+            try { if(conn != null) conn.close(); } catch(SQLException e) {}
         }
     }
 
-    private int processPlaylist(String playlistId, Connection conn) throws Exception {
+    private int processPlaylist(String playlistId, Connection conn,ProgressObserver observer) throws Exception {
         HttpClient client = HttpClient.newHttpClient();
         int totalCount = 0;
+        int processedCount = 0;
+        int totalItemsInPlaylist = 0;
         String nextPageToken = "";
 
         do {
@@ -76,10 +89,19 @@ public class AddServlet extends HttpServlet {
 
             if (!json.has("items")) break;
 
-            // On gère les 50 items de batch
+            if (totalItemsInPlaylist == 0 && json.has("pageInfo")) {
+                totalItemsInPlaylist = json.getAsJsonObject("pageInfo").get("totalResults").getAsInt();
+            }
+
+            // On gère les 50 items du batch
             JsonArray items = json.getAsJsonArray("items");
 
             for (JsonElement item : items) {
+                processedCount++;
+                if (observer != null && totalItemsInPlaylist > 0) {
+                    observer.onProgress(processedCount, totalItemsInPlaylist);
+                }
+
                 JsonObject snippet = item.getAsJsonObject().getAsJsonObject("snippet");
 
                 if (snippet.get("title").getAsString().equals("Private video") ||
@@ -217,6 +239,11 @@ private SongInfo cleanMetadata(String rawTitle, String channelName, String chann
         "(?i)\uFF08[^\uFF09]*?(official|mv|music|video)[^\uFF09]*\uFF09",
 
         // Suffixes (End of string)
+            "(?i)[\u300D\u300F]?\\s*official\\s+music\\s+video$",
+        "(?i)[\u300D\u300F]?\\s*music\\s+video$",
+        "(?i)[\u300D\u300F]?\\s*official\\s+video$",
+        "(?i)[\u300D\u300F]?\\s*official\\s+audio$",
+        "(?i)[\u300D\u300F]?\\s*official$",
         "(?i)\\s*official\\s+music\\s+video$",
         "(?i)\\s*music\\s+video$", // Fix for Aimer "MUSIC VIDEO"
         "(?i)\\s*official\\s+video$",
@@ -253,6 +280,10 @@ private SongInfo cleanMetadata(String rawTitle, String channelName, String chann
                  .replaceAll("\u300E\\s*\u300F", "")
                  .replaceAll("\u3010\\s*\u3011", "")
                  .replaceAll("\\[\\s*\\]", "")
+//                 // Remove orphaned closing brackets at end (」』】"')
+//                 .replaceAll("[\u300D\u300F\u3011\"']+$", "")
+//                 // Remove orphaned opening brackets at start (「『【"')
+//                 .replaceAll("^[\u300C\u300E\u3010\"']+", "")
                  .trim();
     title = removeQuotes(title);
 
@@ -541,6 +572,7 @@ private boolean containsIgnoreCase(String src, String what) {
     return src.toLowerCase().contains(what.toLowerCase());
 }
     class SongInfo {
+        List alliases;
         String title;
         String artist;
 
