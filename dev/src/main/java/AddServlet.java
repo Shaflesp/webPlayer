@@ -232,6 +232,10 @@ if (channelId != null && !channelId.isEmpty() && client != null) {
         "(?i)\\(\\s*MV\\s*Pt\\.?\\s*\\d*\\s*\\)",
         "(?i)\\(\\s*(long|short|full)\\s+ver\\.?\\s*\\)",
         "(?i)\uFF08[^\uFF09]*?(official|mv|music|video)[^\uFF09]*\uFF09",
+            //Genra
+            "(?i)\\[(Drumstep|Dubstep|House|Trap|DnB|Electro|Glitch Hop|Future Bass)\\]",
+        "(?i)\\[(Monstercat[^\\]]*)\\]",
+        "(?i)\\[NCS( Release)?\\]",
         // Suffixes
         "(?i)\\s*MUSIC\\s*VIDEO(?=[\uFF08(\\[])",
         "(?i)\\s*MUSIC\\s*VIDEO$",
@@ -261,6 +265,18 @@ if (channelId != null && !channelId.isEmpty() && client != null) {
     // === 4. CLEANUP BLOCKS & PUNCTUATION ===
     title = title.replaceAll("\\s*[\uFF08(][^)\uFF09]*?/[^)\uFF09]*?(?i)(feat|ft)[^)\uFF09]*?[)\uFF09]", "").trim();
     title = title.replaceAll("\\s*\uFF08[^\uFF09]+\uFF09\\s*$", "").trim();
+
+    java.util.regex.Pattern dualLangPattern = java.util.regex.Pattern.compile(
+    "^(.+?\\s+-\\s+.+?)\\s*,\\s*[A-Z][^,]+\\s+-\\s+.+$"
+    );
+    java.util.regex.Matcher dualLangMatcher = dualLangPattern.matcher(title);
+    if (dualLangMatcher.find()) {
+        String japanesePart = dualLangMatcher.group(1).trim();
+        // Only use Japanese part if it contains Japanese characters
+        if (japanesePart.matches(".*[\\p{IsHan}\\p{IsHiragana}\\p{IsKatakana}].*")) {
+            title = japanesePart;
+        }
+    }
 
     title = title.replaceAll("[\u201C\u201D\u201E]", "\"")
                  .replaceAll("\uFF08\\s*\uFF09", "")
@@ -397,9 +413,10 @@ if (channelId != null && !channelId.isEmpty() && client != null) {
         java.util.regex.Matcher m = java.util.regex.Pattern.compile("^(.+?)\\s*/\\s*(.+?)\\s+-\\s+(.+)$").matcher(title);
         if (m.find()) {
             String p1 = m.group(1).trim(), p2 = m.group(2).trim(), p3 = m.group(3).trim();
-            if (matchesAnyAlias(p1, channelAliases) || p1.toLowerCase().contains("feat") || hasExtractedFeat) {
+            if (isVocaloid(p2) && p2.length() < 15 && !p2.contains(":")) {} //skip
+            else if (matchesAnyAlias(p1, channelAliases) || p1.toLowerCase().contains("feat") || hasExtractedFeat) {
                 artist = p1;
-                finalTitle = p3.length() >= p2.length() ? p3 : p2; // Pick longest (Original)
+                finalTitle = p3.length() >= p2.length() ? p3 : p2;
                 found = true;
             }
             else if (matchesAnyAlias(p3, channelAliases)) {
@@ -412,25 +429,21 @@ if (channelId != null && !channelId.isEmpty() && client != null) {
 
     // Pattern 4: "Artist - Title / Trans" (Apple dot com fix)
     if (!found) {
-    java.util.regex.Matcher m = java.util.regex.Pattern.compile("^(.+?)\\s+-\\s+(.+?)\\s*/\\s*(.+)$").matcher(title);
-    if (m.find()) {
-        String p1 = m.group(1).trim(), p2 = m.group(2).trim(), p3 = m.group(3).trim();
+        java.util.regex.Matcher m = java.util.regex.Pattern.compile("^(.+?)\\s+-\\s+(.+?)\\s*/\\s*(.+)$").matcher(title);
+        if (m.find()) {
+            String p1 = m.group(1).trim(), p2 = m.group(2).trim(), p3 = m.group(3).trim();
 
-        // Only use Pattern 4 if p1 matches channel OR has extracted feat
-        if (matchesAnyAlias(p1, channelAliases) || hasExtractedFeat) {
-            artist = p1;
-
-            // Check if p3 looks like a descriptive translation (has colon or is longer)
-            // If so, keep the full title including slash part
-            if (p3.contains(":") || p3.split("\\s+").length > 3) {
-                finalTitle = p2 + " / " + p3;  // Keep both parts (translation)
-            } else {
-                finalTitle = p2;  // Just the main title (p3 is simple translation)
+            if (matchesAnyAlias(p1, channelAliases) || hasExtractedFeat) {
+                artist = p1;
+                if (p3.contains(":") || p3.split("\\s+").length > 3) {
+                    finalTitle = p2 + " / " + p3;
+                } else {
+                    finalTitle = p2;
+                }
+                found = true;
             }
-            found = true;
         }
     }
-}
 
     // Pattern 5: Three-part "A - B - C"
     if (!found && title.split(" - ").length >= 3) {
@@ -447,14 +460,70 @@ if (channelId != null && !channelId.isEmpty() && client != null) {
     if (!found && title.contains(" - ")) {
         String[] parts = title.split(" - ", 2);
         String p1 = parts[0].trim(), p2 = parts[1].trim();
-        if (containsOnlyVocaloids(p2)) { artist = cleanChannel; finalTitle = p1; if(extractedFeat.isEmpty()) extractedFeat = extractVocaloidsFromString(p2); }
-        else if (matchesAnyAlias(p2, channelAliases)) { finalTitle = p1; artist = p2; }
-        else if (matchesAnyAlias(p1, channelAliases)) { artist = p1; finalTitle = p2; }
-        else if (p1.toLowerCase().contains("feat")) { artist = p1; finalTitle = p2; }
-        else if (hasExtractedFeat && p1.length() < 20) { artist = p1; finalTitle = p2; }
-        else { artist = p1; finalTitle = p2; }
-        found = true;
+     boolean shouldSkip = false;
+        if (p1.contains(" / ")) {
+            String afterSlash = p1.substring(p1.lastIndexOf(" / ") + 3).trim();
+            if (isVocaloid(afterSlash) && afterSlash.length() < 15 && !afterSlash.contains(":")) {
+                shouldSkip = true;  // Let Pattern 6b handle it
+            }
+        }
+        if (!shouldSkip) {
+            // Normal Pattern 6 logic
+            if (containsOnlyVocaloids(p2)) {
+                artist = cleanChannel;
+                finalTitle = p1;
+                if(extractedFeat.isEmpty()) extractedFeat = extractVocaloidsFromString(p2);
+            }
+            else if (matchesAnyAlias(p2, channelAliases)) { finalTitle = p1; artist = p2; }
+            else if (matchesAnyAlias(p1, channelAliases)) { artist = p1; finalTitle = p2; }
+            else if (p1.toLowerCase().contains("feat")) { artist = p1; finalTitle = p2; }
+            else if (hasExtractedFeat && p1.length() < 20) { artist = p1; finalTitle = p2; }
+            else { artist = p1; finalTitle = p2; }
+            found = true;
+        }
     }
+
+    if (!found && title.contains(" / ") && title.contains(" - ")) {
+        java.util.regex.Matcher m = java.util.regex.Pattern.compile("^(.+?)\\s*/\\s*(.+?)\\s+-\\s+(.+)$").matcher(title);
+        if (m.find()) {
+            String beforeSlash = m.group(1).trim();
+            String afterSlash = m.group(2).trim();
+            String afterDash = m.group(3).trim();
+
+            if (isVocaloid(afterSlash) &&
+                !afterSlash.contains(":") &&
+                afterSlash.length() < 15 &&
+                (matchesAnyAlias(afterDash, channelAliases) || afterDash.length() < 30)) {
+                finalTitle = beforeSlash;
+                artist = afterDash;
+                if (extractedFeat.isEmpty()) {
+                    extractedFeat = afterSlash;
+                }
+                found = true;
+            }
+        }
+    }
+
+    if (!found && title.contains(" / ") && !title.contains(" - ")) {
+    java.util.regex.Matcher m = java.util.regex.Pattern.compile("^(.+?)\\s*/\\s*(.+?)(?:\\s*\\([^)]+\\))?$").matcher(title);
+    if (m.find()) {
+        String beforeSlash = m.group(1).trim();   // 乖離するゲンザイ
+        String afterSlashRaw = m.group(2).trim(); // 重音テト (Trust Me)
+
+        // Remove parenthetical translation to get just the vocaloid name
+        String afterSlash = afterSlashRaw.replaceAll("\\s*\\([^)]+\\)$", "").trim(); // 重音テト
+
+        // If afterSlash is a vocaloid
+        if (isVocaloid(afterSlash) && afterSlash.length() < 15) {
+            finalTitle = beforeSlash;
+            artist = cleanChannel;  // Artist from channel (阿修)
+            if (extractedFeat.isEmpty()) {
+                extractedFeat = afterSlash;
+            }
+            found = true;
+        }
+    }
+}
 
     // Pattern 7: Slash
     if (!found && title.contains(" / ")) {
@@ -485,7 +554,8 @@ if (channelId != null && !channelId.isEmpty() && client != null) {
     // === 10. APPEND FEAT ===
     if (!extractedFeat.isEmpty()) {
         extractedFeat = extractedFeat.replaceAll("\\s*&\\s*", ", ")
-                                 .replaceAll("\\s*、\\s*", ", ");
+                                 .replaceAll("\\s*、\\s*", ", ")
+                                .replaceAll("\\s*・\\s*",", ");
         extractedFeat = deduplicateFeat(extractedFeat, artist);
         if (!extractedFeat.isEmpty()) {
             boolean artistHasFeat = artist.toLowerCase().contains("feat") || artist.toLowerCase().contains("ft.");
@@ -514,15 +584,10 @@ private SongInfo finalize(String title, String artist) {
          title = title.replaceAll("^[\u300C\u300E'\"]+", "").trim();
     }
 
-    if (!title.contains("\u300E") && title.contains("\u300F")) {
-        title = title.replace("\u300F", " ");
-    }
-    if (!title.contains("\u300C") && title.contains("\u300D")) {
-        title = title.replace("\u300D", " ");
-    }
-
-    if (title.isBlank()) title = "Unknown Title";
-    if (artist.isBlank()) artist = "Unknown Artist";
+    title=removeOrphanedQuotes(title);
+    //Azari
+//    if (title.isBlank()) title = "Unknown Title";
+//    if (artist.isBlank()) artist = "Unknown Artist";
     return new SongInfo(title, artist);
 }
 
@@ -538,6 +603,17 @@ private String sanitizeChannelName(String name) {
                .replaceAll("(?i)(VEVO|Official|Music|Records|TV|Audio|Studio|YouTube)", "")
                 .replaceAll("\\s+Channel$", "")
                .trim();
+}
+private String removeOrphanedQuotes(String text) {
+    if (text == null) return "";
+    if (!text.contains("\u300E") && text.contains("\u300F")) {
+        text = text.replace("\u300F", " ");
+    }
+    if (!text.contains("\u300C") && text.contains("\u300D")) {
+        text = text.replace("\u300D", " ");
+    }
+    text = text.replaceAll("'", "").replaceAll("\"","");
+    return text;
 }
 
 private String removeQuotes(String text) {
@@ -587,9 +663,10 @@ private boolean matchesAnyAlias(String text, String[] aliases) {
 private static final String[] VOCALOIDS = {
     "\u521D\u97F3\u30DF\u30AF", "\u91CD\u97F3\u30C6\u30C8", "\u93E1\u97F3\u30EA\u30F3",
     "\u93E1\u97F3\u30EC\u30F3", "\u97F3\u8857\u30A6\u30CA", "\u53EF\u4E0D", "\u661F\u754C",
+    "\u5DE1\u97F3\u30EB\u30AB",
     "GUMI", "IA", "flower", "Flower", "KAITO", "MEIKO",
-    "Miku", "Teto", "Rin", "Len", "Kasane Teto", "Hatsune Miku",
-    "Kagamine Rin", "Kagamine Len", "Otomachi Una"
+    "Miku", "Teto", "Rin", "Len", "Luka", "Kasane Teto", "Hatsune Miku",
+    "Kagamine Rin", "Kagamine Len", "Otomachi Una", "Megurine Luka"
 };
 
 private boolean isVocaloid(String t) {
