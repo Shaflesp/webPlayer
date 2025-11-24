@@ -213,11 +213,32 @@ private SongInfo cleanMetadata(String rawTitle, String channelName, String chann
     }
     String[] channelAliases = aliasesList.toArray(new String[0]);
 
+    java.util.regex.Matcher mBracketStart = java.util.regex.Pattern.compile("^【(.+?)】\\s*(.+)$").matcher(title);
+    if (mBracketStart.find()) {
+        String content = mBracketStart.group(1).trim();
+        String restOfTitle = mBracketStart.group(2).trim();
+        StringBuilder extractedFeat = new StringBuilder();
+
+        String[] cleanNames = content.replaceAll("(?i)\\s*[×x&]\\s*", ", ").split(", ");
+        for (String vocal : cleanNames) {
+            vocal = vocal.trim();
+            if (isVocaloid(vocal)) {
+                if (extractedFeat.length() == 0) {
+                    extractedFeat = new StringBuilder(vocal);
+                } else {
+                    extractedFeat.append(", ").append(vocal);
+                }
+            }
+        }
+        title=restOfTitle+((extractedFeat.length() == 0) ? "" : " (feat. " + extractedFeat + ")");
+    }
+
     // === 3. GARBAGE REMOVAL ===
     String[] patterns = {
         "[\u2190-\u21FF]",
             "[\u2727\u2726]",
         "\u3010[^\u3011]*\u3011",
+            "[◤◢]",
         "(?i)\\[[^\\]]*?(official|mv|music|video|hd|4k|hq|lyrics?|original|clip|officiel|nv)[^\\]]*\\]",
         "\\[\\s*\\]",
         "(?i)\u300C[^\u300D]*?(MV|\uFF2D\uFF36)[^\u300D]*\u300D",
@@ -240,7 +261,7 @@ private SongInfo cleanMetadata(String rawTitle, String channelName, String chann
         "(?i)\\(\\s*(long|short|full)\\s+ver\\.?\\s*\\)",
         "(?i)\uFF08[^\uFF09]*?(official|mv|music|video)[^\uFF09]*\uFF09",
         "\\s*\\S*(?i)MV(\\s|\u300E|$)",
-            "(?i)\\[(Drumstep|Dubstep|House|Trap|DnB|Electro|Glitch Hop|Future Bass|Nightcore)\\]",
+            "(?i)\\[(Drumstep|Dubstep|House|Trap|DnB|Electro|Glitch Hop|Future Bass|Nightcore|Switching Vocals)\\]",
                         "(?i)\\((Drumstep|Dubstep|House|Trap|DnB|Electro|Glitch Hop|Future Bass|Nightcore)\\)",
         "(?i)\\[(Monstercat[^\\]]*)\\]",
         "(?i)\\[NCS( Release)?\\]",
@@ -452,7 +473,7 @@ private SongInfo cleanMetadata(String rawTitle, String channelName, String chann
     // Pattern 1: VS
     if (!found && title.contains(" - ") && title.toUpperCase().contains(" VS ")) {
         String after = title.substring(title.indexOf(" - ") + 3).trim();
-        if (containsVocaloids(after)) { artist = cleanChannel; finalTitle = title; found = true; }
+        if (isVocaloid(after)) { artist = cleanChannel; finalTitle = title; found = true; }
     }
 
     // Pattern 2: Reversed "(Vocaloid) - Producer"
@@ -550,42 +571,35 @@ private SongInfo cleanMetadata(String rawTitle, String channelName, String chann
         }
     }
 
-    if (!found && title.contains(" / ") && title.contains(" - ")) {
-        java.util.regex.Matcher m = java.util.regex.Pattern.compile("^(.+?)\\s*/\\s*(.+?)\\s+-\\s+(.+)$").matcher(title);
+    if (!found && title.contains(" / ") && !title.contains(" - ")) {
+        java.util.regex.Matcher m = java.util.regex.Pattern.compile("^(.+?)\\s*/\\s*(.+)$").matcher(title);
         if (m.find()) {
             String beforeSlash = m.group(1).trim();
-            String afterSlash = m.group(2).trim();
-            String afterDash = m.group(3).trim();
+            String afterSlashRaw = m.group(2).trim();
 
-            if (isVocaloid(afterSlash) &&
-                !afterSlash.contains(":") &&
-                afterSlash.length() < 15 &&
-                (matchesAnyAlias(afterDash, channelAliases) || afterDash.length() < 30)) {
-                finalTitle = beforeSlash;
-                artist = afterDash;
-                if (extractedFeat.isEmpty()) {
-                    extractedFeat = afterSlash;
-                }
-                found = true;
+            String potentialVocaloid = afterSlashRaw;
+            String suffix = "";
+
+            java.util.regex.Matcher mSuffix = java.util.regex.Pattern.compile("^(.*?)(\\s*[\\(\\[\\uFF08\\u3010][^)\\]\\uFF09\\u3011]+[)\\]\\uFF09\\u3011])$").matcher(afterSlashRaw);
+            if (mSuffix.find()) {
+                potentialVocaloid = mSuffix.group(1).trim();
+                suffix = mSuffix.group(2);
             }
-        }
-    }
 
-    if (!found && title.contains(" / ") && !title.contains(" - ")) {
-        java.util.regex.Matcher m = java.util.regex.Pattern.compile("^(.+?)\\s*/\\s*(.+?)(?:\\s*\\([^)]+\\))?$").matcher(title);
-        if (m.find()) {
-            String beforeSlash = m.group(1).trim();   // 乖離するゲンザイ
-            String afterSlashRaw = m.group(2).trim(); // 重音テト (Trust Me)
+            // 2. Validate: Is the remaining part a Vocaloid or List?
+            boolean isExactVoc = isVocaloid(potentialVocaloid);
+            boolean isStrictList = containsOnlyVocaloids(potentialVocaloid);
+            boolean isLooseList = false;
 
-            // Remove parenthetical translation to get just the vocaloid name
-            String afterSlash = afterSlashRaw.replaceAll("\\s*\\([^)]+\\)$", "").trim(); // 重音テト
+            if (!isStrictList && potentialVocaloid.matches(".*[,&、・].*") && isVocaloid(potentialVocaloid)) {
+                isLooseList = true;
+            }
 
-            // If afterSlash is a vocaloid
-            if (isVocaloid(afterSlash) && afterSlash.length() < 15) {
-                finalTitle = beforeSlash;
-                artist = cleanChannel;  // Artist from channel (阿修)
+            if (isExactVoc || isStrictList || isLooseList) {
+                finalTitle = beforeSlash + suffix;
+                artist = cleanChannel;
                 if (extractedFeat.isEmpty()) {
-                    extractedFeat = afterSlash;
+                    extractedFeat = potentialVocaloid;
                 }
                 found = true;
             }
@@ -756,9 +770,6 @@ private java.util.List<String> fetchChannelAliases(String channelId, HttpClient 
 
 private boolean matchesAnyAlias(String text, String[] aliases) {
     for (String a : aliases) {
-//        if (a.length() > 1 && a.equalsIgnoreCase(text)) return true;
-//        if (a.length() > 1 && a.replaceAll("\\s+", "")
-//                .equalsIgnoreCase(text.replaceAll("\\s+", ""))) return true;
         if (a.length() > 1 && containsIgnoreCase(a,text)) return true;
 
     }
@@ -767,10 +778,6 @@ private boolean matchesAnyAlias(String text, String[] aliases) {
 
 private boolean isVocaloid(String t) {
     return Vocaloid.isVocaloid(t);
-}
-
-private boolean containsVocaloids(String t) {
-    return isVocaloid(t);
 }
 
 private boolean containsOnlyVocaloids(String text) {

@@ -7,14 +7,18 @@ public enum Vocaloid {
     UNA("音街ウナ", "Otomachi Una", "Una Otomachi"),
     KAFU("可不", "Kafu"),
     SEKAI("星界", "Sekai"),
-    GUMI("GUMI", "Gumi"),
-    IA("IA", "Ia"),
-    FLOWER("flower", "Flower"),
-    KAITO("KAITO", "Kaito"),
-    MEIKO("MEIKO", "Meiko"),
+    YUKI("歌愛ユキ", "Kaai Yuki", "Yuki Kaai", "Yuki"),
+    GUMI("グミ", "Gumi"),
+    IA("イア", "Ia"),
+    FLOWER("フラワ", "ブイフラワ","flower","v flower"),
+    KAITO("カイト", "Kaito"),
+    MEIKO("メイコ", "Meiko"),
     REI("足立レイ", "Adachi Rei", "Rei Adachi"),
     KAZEHIKIB("カゼヒキβ", "Kazehiki Beta", "Beta Kazehiki", "Kazehiki β"),
-    GEKIYAKUB("ゲキヤクβ", "Gekiyaku Beta", "Beta Gekiyaku", "Gekiyaku β");
+    GEKIYAKUB("ゲキヤクβ", "Gekiyaku Beta", "Beta Gekiyaku", "Gekiyaku β"),
+    KOTONOHA("琴葉 茜・葵","Kotonoha Akane & Aoi", "Akane & Aoi Kotonoha", "Kotonoha Twins"),
+    NERU("亞北ネル", "Akita Neru", "Neru Akita", "Neru"),
+    LEUR("ルウル","LeuR");
 
     private final String canonical;  // Preferred Japanese name
     private final String[] aliases;
@@ -30,9 +34,9 @@ public enum Vocaloid {
     public boolean matches(String text) {
         if (text == null) return false;
         String lower = text.toLowerCase().trim();
-        if (canonical.equalsIgnoreCase(text)) return true;
+        if (canonical.equalsIgnoreCase(lower)) return true;
         for (String alias : aliases) {
-            if (alias.equalsIgnoreCase(text)) return true;
+            if (alias.equalsIgnoreCase(lower)) return true;
         }
         return false;
     }
