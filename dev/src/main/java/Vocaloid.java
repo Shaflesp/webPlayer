@@ -11,7 +11,10 @@ public enum Vocaloid {
     IA("IA", "Ia"),
     FLOWER("flower", "Flower"),
     KAITO("KAITO", "Kaito"),
-    MEIKO("MEIKO", "Meiko");
+    MEIKO("MEIKO", "Meiko"),
+    REI("足立レイ", "Adachi Rei", "Rei Adachi"),
+    KAZEHIKIB("カゼヒキβ", "Kazehiki Beta", "Beta Kazehiki", "Kazehiki β"),
+    GEKIYAKUB("ゲキヤクβ", "Gekiyaku Beta", "Beta Gekiyaku", "Gekiyaku β");
 
     private final String canonical;  // Preferred Japanese name
     private final String[] aliases;

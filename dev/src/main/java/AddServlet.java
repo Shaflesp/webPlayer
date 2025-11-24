@@ -118,7 +118,7 @@ public class AddServlet extends HttpServlet {
                     : "";
                 SongInfo clean = cleanMetadata(rawTitle, channelTitle, channelId, client);
 
-                boolean success = insertSong(conn, clean.title, clean.artist, videoId);
+                boolean success = insertSong(conn, clean.title,rawTitle, clean.artist, videoId);
                 if (success) totalCount++;
             }
 
@@ -133,12 +133,13 @@ public class AddServlet extends HttpServlet {
         return totalCount;
     }
 
-    private boolean insertSong(Connection conn, String title, String artist, String videoId) {
-        String sql = "INSERT INTO playlist (title, artist, video_id) VALUES (?, ?, ?) ON CONFLICT (video_id) DO NOTHING";
+    private boolean insertSong(Connection conn, String title,String raw_title, String artist, String videoId) {
+        String sql = "INSERT INTO playlist (title, raw_title,artist, video_id) VALUES (?,?, ?, ?) ON CONFLICT (video_id) DO NOTHING";
         try (PreparedStatement stmt = conn.prepareStatement(sql)) {
             stmt.setString(1, title);
-            stmt.setString(2, artist);
-            stmt.setString(3, videoId);
+            stmt.setString(2, raw_title);
+            stmt.setString(3, artist);
+            stmt.setString(4, videoId);
             int rows = stmt.executeUpdate();
             return rows > 0;
         } catch (SQLException e) {
@@ -171,7 +172,7 @@ public class AddServlet extends HttpServlet {
             : "";
         SongInfo clean = cleanMetadata(rawTitle, channelTitle, channelId, client);
 
-        boolean success = insertSong(conn, clean.title, clean.artist, videoId);
+        boolean success = insertSong(conn, clean.title,rawTitle, clean.artist, videoId);
         return success ? 1 : 0;
     }
 
@@ -214,19 +215,23 @@ private SongInfo cleanMetadata(String rawTitle, String channelName, String chann
 
     // === 3. GARBAGE REMOVAL ===
     String[] patterns = {
+        "[\u2190-\u21FF]",
+            "[\u2727\u2726]",
         "\u3010[^\u3011]*\u3011",
-        "(?i)\\[[^\\]]*?(official|mv|music|video|hd|4k|hq|original|clip|officiel|nv)[^\\]]*\\]",
+        "(?i)\\[[^\\]]*?(official|mv|music|video|hd|4k|hq|lyrics?|original|clip|officiel|nv)[^\\]]*\\]",
         "\\[\\s*\\]",
         "(?i)\u300C[^\u300D]*?(MV|\uFF2D\uFF36)[^\u300D]*\u300D",
         // Parentheses
         "(?i)\\([^)]*official\\s*audio[^)]*\\)",
         "(?i)\\([^)]*official[^)]*video[^)]*\\)",
+            "(?i)\\([^)]*original[^)]*song[^)]*\\)",
         "(?i)\\([^)]*music\\s*video[^)]*\\)",
         "(?i)\\([^)]*theme\\s*song[^)]*\\)",
         "(?i)\\([^)]*full\\s*album[^)]*\\)",
             "(?i)\\(\\s*lyrics?\\s*\\)",
         "(?i)\\([^)]*lyrics?\\s*video[^)]*\\)",
         "(?i)\\([^)]*clip\\s*officiel[^)]*\\)",
+            "(?i)\\([^)]*nightcore[^)]*\\)",
         "(?i)\\(\\s*official\\s*\\)",
         "(?i)\\(\\s*audio\\s*\\)",
         "(?i)\\(\\s*mv\\s*\\)",
@@ -235,7 +240,8 @@ private SongInfo cleanMetadata(String rawTitle, String channelName, String chann
         "(?i)\\(\\s*(long|short|full)\\s+ver\\.?\\s*\\)",
         "(?i)\uFF08[^\uFF09]*?(official|mv|music|video)[^\uFF09]*\uFF09",
         "\\s*\\S*(?i)MV(\\s|\u300E|$)",
-            "(?i)\\[(Drumstep|Dubstep|House|Trap|DnB|Electro|Glitch Hop|Future Bass)\\]",
+            "(?i)\\[(Drumstep|Dubstep|House|Trap|DnB|Electro|Glitch Hop|Future Bass|Nightcore)\\]",
+                        "(?i)\\((Drumstep|Dubstep|House|Trap|DnB|Electro|Glitch Hop|Future Bass|Nightcore)\\)",
         "(?i)\\[(Monstercat[^\\]]*)\\]",
         "(?i)\\[NCS( Release)?\\]",
         // Suffixes
@@ -253,7 +259,10 @@ private SongInfo cleanMetadata(String rawTitle, String channelName, String chann
         "(?i)\\s*hd$",
             "(?i)\\s*hq$",
         "(?i)\\s*cover$",
+            "(?i)\\s*full\\s*cover$",
+            "(?i)\\s*full\\s*cover(?=\\s*-)",
         "(?i)SV$",
+            "(?i)nightcore",
         // Japanese
         "\u6B4C\u3044\u307E\u3057\u305F",
         "\u6B4C\u3063\u3066\u307F\u305F",
@@ -305,27 +314,62 @@ private SongInfo cleanMetadata(String rawTitle, String channelName, String chann
                  .replaceAll("\\[\\s*\\]", "")
                  .replaceAll("\\s+", " ")
                  .trim();
-    title = title.replaceAll("([\u3002\u300D\u300F])\\s*-", "$1 - ");
+    title = title.replaceAll("([\u3002\u300D\u300F])\\s*-", "$1 - ")
+                .replaceAll("(\\S)([\\(\uFF08])", "$1 $2")
+                .replaceAll("\\|+", "-");
     title = removeQuotes(title);
 
     // === 5. EXTRACT FEAT (Early Extraction) ===
     java.util.List<String> featList = new java.util.ArrayList<>();
 
-    java.util.regex.Pattern pFeatParen = java.util.regex.Pattern.compile("(?i)\\s*[\uFF08(\\[]\\s*(feat\\.?|ft\\.?|with|w/|Vo[\\.．]?)\\s*([^)\uFF09\\]]+)[)\uFF09\\]]");
+    java.util.regex.Pattern pFeatParen = java.util.regex.Pattern.compile("(?i)\\s*[\uFF08(\\[]\\s*(feat\\.?|ft\\.?|with|w/|Vo[\\.．]?)[\\s:]*\\s*([^)\uFF09\\]]+)[)\uFF09\\]]");
     java.util.regex.Matcher mFeatParen = pFeatParen.matcher(title);
     while (mFeatParen.find()) featList.add(mFeatParen.group(2).trim());
-    title = title.replaceAll("(?i)\\s*[\uFF08(\\[]\\s*(?:feat\\.?|ft\\.?|with|w/|Vo[\\.．]?)\\s*[^)\uFF09\\]]+[)\uFF09\\]]", "").trim();
+    title = title.replaceAll("(?i)\\s*[\uFF08(\\[]\\s*(?:feat\\.?|ft\\.?|with|w/|Vo[\\.．]?)[\\s:]*\\s*[^)\uFF09\\]]+[)\uFF09\\]]", "").trim();
 
-    java.util.regex.Pattern pVo = java.util.regex.Pattern.compile("(?i)Vo[\\.．]?\\s+(.+)$");
+    java.util.regex.Pattern pVo = java.util.regex.Pattern.compile("(?i)Vo[\\.．]?[\\s:]+(.+)$");
     java.util.regex.Matcher mVo = pVo.matcher(title);
     if (mVo.find()) {
         featList.add(mVo.group(1).trim());
         title = title.substring(0, mVo.start()).trim();
     }
 
+    java.util.regex.Pattern pVer = java.util.regex.Pattern.compile("(?i)(?:[\\uFF08(\\[]\\s*(?:([^)\\uFF09\\]]+?)\\s+ver\\.?|ver\\.?\\s+([^)\\uFF09\\]]+?))\\s*[)\\uFF09\\]]|(?:^|\\s)ver\\.?\\s+(.+)$)");
+    java.util.regex.Matcher mVer = pVer.matcher(title);
+    while (mVer.find()) {
+        String potentialArtist = null;
+
+        if (mVer.group(1) != null) potentialArtist = mVer.group(1);
+        else if (mVer.group(2) != null) potentialArtist = mVer.group(2);
+        else if (mVer.group(3) != null) potentialArtist = mVer.group(3);
+
+        if (potentialArtist != null) {
+            potentialArtist = potentialArtist.trim();
+            java.util.regex.Matcher mSplit = java.util.regex.Pattern.compile("^(.+?)\\s*[\\(\\uFF08](.+?)[\\)\\uFF09](.*)$").matcher(potentialArtist);
+
+            if (mSplit.find()) {
+                featList.add(mSplit.group(1).trim());
+                //featList.add(mSplit.group(2).trim()); // Alias
+
+                //trailing part if exists
+                String trailing = mSplit.group(3).trim();
+                if (!trailing.isEmpty()) {
+                    String cleanTrailing = trailing.replaceAll("(?i)^(?:feat\\.?|ft\\.?|with|w/|Vo[\\.．]?|&)\\s*", "").trim();
+                    if (!cleanTrailing.isEmpty()) {
+                        featList.add(cleanTrailing);
+                    }
+                }
+            } else {
+                featList.add(potentialArtist);
+            }
+        }
+    }
+
+    title = pVer.matcher(title).replaceAll("").trim();
+
     // 5b. Feat before Slash "feat. X /" (Fix for Apple dot com)
     // Matches " feat. X" before a slash, replaces with just " /" to keep structure
-    java.util.regex.Pattern pFeatSlash = java.util.regex.Pattern.compile("(?i)\\s+(feat|ft|with)[\\.\\s]\\s*(.+?)\\s*(?=/)");
+    java.util.regex.Pattern pFeatSlash = java.util.regex.Pattern.compile("(?i)\\s+(feat|ft|with)[\\.\\s:]*\\s*(.+?)\\s*(?=/)");
     java.util.regex.Matcher mFeatSlash = pFeatSlash.matcher(title);
     if (mFeatSlash.find()) {
         featList.add(mFeatSlash.group(2).trim());
@@ -333,7 +377,7 @@ private SongInfo cleanMetadata(String rawTitle, String channelName, String chann
     }
 
     // 5c. Feat at End
-    java.util.regex.Pattern pFeatEnd = java.util.regex.Pattern.compile("(?i)\\s+(feat|ft|with)[\\.\\s]\\s*((?:(?!\\s+-\\s+).)+)\\s*$");
+    java.util.regex.Pattern pFeatEnd = java.util.regex.Pattern.compile("(?i)\\s+(feat|ft|with)[\\.\\s:]*\\s*((?:(?!\\s+-\\s+).)+)\\s*$");
     java.util.regex.Matcher mFeatEnd = pFeatEnd.matcher(title);
     if (mFeatEnd.find()) {
         featList.add(mFeatEnd.group(2).trim());
@@ -486,6 +530,9 @@ private SongInfo cleanMetadata(String rawTitle, String channelName, String chann
                 shouldSkip = true;
             }
         }
+        if (p2.matches("(?i)^(Normal|Hard|Easy|Instrumental|Off Vocal|Karaoke|Remix|Mix|Original Mix|Extended|Radio Edit|OST|Original Soundtrack)(?:[\\s\\u3000]*[\\(\\[\\uFF08\\u3010].*)?$")) {
+            shouldSkip = true;
+        }
 
         if (!shouldSkip) {
             if (containsOnlyVocaloids(p2)) {
@@ -556,6 +603,12 @@ private SongInfo cleanMetadata(String rawTitle, String channelName, String chann
     }
 
     // === 8. FALLBACK ===
+    boolean channelIsTopic = channelName.matches("(?i).*\\s-\\sTopic$");
+    boolean extractedMatchesChannel = matchesAnyAlias(artist, channelAliases);
+    if (found && channelIsTopic && !extractedMatchesChannel) {
+        artist = cleanChannel;
+        finalTitle = title;
+    }
     if (artist.isEmpty()) {artist = cleanChannel;}
 
     // === 9. REDUNDANCY CHECK ===
@@ -584,35 +637,35 @@ private SongInfo cleanMetadata(String rawTitle, String channelName, String chann
     }
 
     // === 10. APPEND FEAT ===
-if (!extractedFeat.isEmpty()) {
-    // Split "X & Y" or "X、Y" into separate entries
-    extractedFeat = extractedFeat.replaceAll("\\s*&\\s*", ", ")
-                                 .replaceAll("\\s*、\\s*", ", ")
-                                .replaceAll("\\s*・\\s*",", ")
-                                .replaceAll("\\s*•\\s*",", ");
+    if (!extractedFeat.isEmpty()) {
+        // Split "X & Y" or "X、Y" into separate entries
+        extractedFeat = extractedFeat.replaceAll("\\s*&\\s*", ", ")
+                                     .replaceAll("\\s*、\\s*", ", ")
+                                    .replaceAll("\\s*・\\s*",", ")
+                                    .replaceAll("\\s*•\\s*",", ");
 
-    String existingFeats = "";
-    if (artist.toLowerCase().contains("feat")
-            || artist.toLowerCase().contains("ft.")
-            || artist.toLowerCase().contains("feat.")) {
-        java.util.regex.Pattern p = java.util.regex.Pattern.compile("(?i)(?:feat\\.?|ft\\.)\\s+(.+)$");
-        java.util.regex.Matcher m = p.matcher(artist);
-        if (m.find()) {
-            existingFeats = m.group(1).trim();
+        String existingFeats = "";
+        if (artist.toLowerCase().contains("feat")
+                || artist.toLowerCase().contains("ft.")
+                || artist.toLowerCase().contains("feat.")) {
+            java.util.regex.Pattern p = java.util.regex.Pattern.compile("(?i)(?:feat\\.?|ft\\.)\\s+(.+)$");
+            java.util.regex.Matcher m = p.matcher(artist);
+            if (m.find()) {
+                existingFeats = m.group(1).trim();
+            }
+            artist = baseArtist;
         }
-        artist = baseArtist;
+
+        // Merge existing feats with new feats
+        String allFeats = existingFeats.isEmpty() ? extractedFeat : existingFeats + ", " + extractedFeat;
+
+        // Deduplicate everything together
+        allFeats = deduplicateFeat(allFeats, artist);
+
+        if (!allFeats.isEmpty()) {
+            artist = artist + " feat. " + allFeats;
+        }
     }
-
-    // Merge existing feats with new feats
-    String allFeats = existingFeats.isEmpty() ? extractedFeat : existingFeats + ", " + extractedFeat;
-
-    // Deduplicate everything together
-    allFeats = deduplicateFeat(allFeats, artist);
-
-    if (!allFeats.isEmpty()) {
-        artist = artist + " feat. " + allFeats;
-    }
-}
 
     return finalize(finalTitle, artist);
 }
@@ -703,7 +756,11 @@ private java.util.List<String> fetchChannelAliases(String channelId, HttpClient 
 
 private boolean matchesAnyAlias(String text, String[] aliases) {
     for (String a : aliases) {
-        if (a.length() > 1 && a.equalsIgnoreCase(text)) return true;
+//        if (a.length() > 1 && a.equalsIgnoreCase(text)) return true;
+//        if (a.length() > 1 && a.replaceAll("\\s+", "")
+//                .equalsIgnoreCase(text.replaceAll("\\s+", ""))) return true;
+        if (a.length() > 1 && containsIgnoreCase(a,text)) return true;
+
     }
     return false;
 }
@@ -718,18 +775,22 @@ private boolean containsVocaloids(String t) {
 
 private boolean containsOnlyVocaloids(String text) {
     if (text.isEmpty() || text.toUpperCase().contains(" VS ")) return false;
+    String temp = text;
 
-    // Split by commas and check each part
-    String[] parts = text.split("[,\u3001]");
-    for (String part : parts) {
-        String cleaned = part.trim()
-                            .replaceAll("[\u03B1\u03B2]$", "")  // Remove Greek letter suffix
-                            .trim();
-        if (!cleaned.isEmpty() && !Vocaloid.isVocaloid(cleaned)) {
-            return false;
+    // Remove all vocaloid
+    for (Vocaloid v : Vocaloid.values()) {
+        // Remove canonical name
+        temp = temp.replaceAll("(?i)\\Q" + v.getCanonical() + "\\E[^\u3001,\\s]*", "");
+        // Remove all aliases
+        for (String alias : v.getAliases()) {
+            temp = temp.replaceAll("(?i)\\b" + java.util.regex.Pattern.quote(alias) + "\\b", "");
         }
     }
-    return true;
+
+    // vocaloid w/(β, α)
+    temp = temp.replaceAll("[\\p{IsHan}\\p{IsKatakana}\\p{IsHiragana}]+[\u03B1\u03B2]", "");
+    temp = temp.replaceAll("[,\u3001\\s]+", "").trim();
+    return temp.isEmpty();
 }
 
 private String extractVocaloidsFromString(String text) {
@@ -769,9 +830,11 @@ private boolean containsIgnoreCase(String src, String what) {
     if (src == null || what == null) return false;
     return src.toLowerCase().contains(what.toLowerCase());
 }
+
     class SongInfo {
         List alliases;
         String title;
+        String raw_title;
         String artist;
 
         SongInfo(String t, String a) { this.title = t; this.artist = a; }
