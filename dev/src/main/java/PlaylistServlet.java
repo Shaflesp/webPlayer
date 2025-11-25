@@ -26,7 +26,7 @@ public class PlaylistServlet extends HttpServlet {
         }
         try (Connection conn = DriverManager.getConnection(URL, USER, PASS);
              Statement stmt = conn.createStatement();
-             ResultSet rs = stmt.executeQuery("SELECT * FROM playlist")) {
+             ResultSet rs = stmt.executeQuery("SELECT * FROM track")) {
 
             while (rs.next()) {
                 Song s = new Song();

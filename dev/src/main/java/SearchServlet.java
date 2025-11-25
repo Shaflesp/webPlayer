@@ -41,10 +41,10 @@ public class SearchServlet extends HttpServlet {
             String sql;
             
             if (query.trim().isEmpty()) {
-                sql = "SELECT * FROM playlist ORDER BY id DESC LIMIT 50";
+                sql = "SELECT * FROM track ORDER BY id DESC LIMIT 50";
                 pstmt = conn.prepareStatement(sql);
             } else {
-                sql = "SELECT * FROM playlist WHERE title ILIKE ? OR artist ILIKE ?";
+                sql = "SELECT * FROM track WHERE title ILIKE ? OR artist ILIKE ?";
                 pstmt = conn.prepareStatement(sql);
                 String searchPattern = "%" + query + "%";
                 pstmt.setString(1, searchPattern);
