@@ -11,6 +11,10 @@ public class Song {
         this.videoId = videoId;
     }
 
-    public Song() {
+    public Song(String title, String artist){
+        this.title=title;
+        this.artist=artist;
     }
+
+    public Song() {}
 }

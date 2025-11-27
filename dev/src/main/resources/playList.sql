@@ -15,9 +15,8 @@ CREATE TABLE playlist (
     video_id VARCHAR(20) UNIQUE NOT NULL,
     cmpt int,
     totalWatchTime time,
-    constraint Pk_playlist PRIMARY KEY (playlist_id),
+    constraint Pk_playlist PRIMARY KEY (playlist_id, video_id),
     constraint FK_playlist_track FOREIGN KEY (video_id)
         REFERENCES track (video_id) on update CASCADE
                                     ON DELETE CASCADE
-
 );
