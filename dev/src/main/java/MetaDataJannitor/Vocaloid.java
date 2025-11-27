@@ -1,3 +1,5 @@
+package MetaDataJannitor;
+
 public enum Vocaloid {
     MIKU("初音ミク", "Hatsune Miku", "Miku Hatsune", "Miku"),
     TETO("重音テト", "Kasane Teto", "Teto Kasane", "Teto","Tet0"),
