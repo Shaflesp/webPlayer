@@ -2,6 +2,7 @@ dev/target/
 dev/target/*
 target/
 target/*
+target
 dev/src/main/resources/keys.csv
 
 # Created by https://www.toptal.com/developers/gitignore/api/macos,linux,intellij,visualstudiocode,windows,java
@@ -18,6 +19,7 @@ dev/src/main/resources/keys.csv
 .idea/**/usage.statistics.xml
 .idea/**/dictionaries
 .idea/**/shelf
+.idea
 
 # AWS User-specific
 .idea/**/aws.xml
