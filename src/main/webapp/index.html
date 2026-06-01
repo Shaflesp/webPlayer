@@ -1,10 +1,167 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="fr">
 <head>
-  <meta charset="UTF-8">
-  <title>$Title$</title>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>WebPlayer — MPD</title>
+    <link rel="icon" href="images/logo.png" type="image/png">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css">
+    <link rel="stylesheet" href="css/style.css">
 </head>
 <body>
-$END$
+
+<!-- ─── Sidebar ─────────────────────────────────────────────────── -->
+<aside class="sidebar">
+
+    <div class="sidebar-header">
+        <div class="brand">
+            <img src="images/logo.png" alt="" class="brand-logo" onerror="this.style.display='none'">
+            <span>WebPlayer</span>
+        </div>
+        <div class="tab-bar">
+            <button class="tab active" data-tab="queue"   onclick="switchTab('queue')">
+                <i class="fas fa-list-ul"></i> Queue
+            </button>
+            <button class="tab"        data-tab="library" onclick="switchTab('library')">
+                <i class="fas fa-folder-open"></i> Library
+            </button>
+            <button class="tab"        data-tab="search"  onclick="switchTab('search')">
+                <i class="fas fa-magnifying-glass"></i> Search
+            </button>
+        </div>
+    </div>
+
+    <!-- Queue tab -->
+    <div id="tab-queue" class="tab-content active">
+        <div class="tab-toolbar">
+            <span class="toolbar-label" id="queue-count">Queue</span>
+            <button class="icon-btn" title="Clear queue"
+                    onclick="sendCommand('clear').then(() => fetchQueue())">
+                <i class="fas fa-trash-can"></i>
+            </button>
+        </div>
+        <div class="scroll-list" id="queue-list"></div>
+    </div>
+
+    <!-- Library tab -->
+    <div id="tab-library" class="tab-content">
+        <div class="tab-toolbar">
+            <button class="icon-btn" id="browse-back" onclick="browseBack()" title="Go back" style="display:none">
+                <i class="fas fa-arrow-left"></i>
+            </button>
+            <span class="toolbar-label" id="browse-path">Library</span>
+            <button class="icon-btn" id="browse-add-all" onclick="addCurrentDir()" title="Add all to queue" style="display:none">
+                <i class="fas fa-circle-plus"></i>
+            </button>
+            <button class="icon-btn" onclick="updateDB()" title="Update MPD database">
+                <i class="fas fa-arrows-rotate"></i>
+            </button>
+        </div>
+        <div class="scroll-list" id="library-list"></div>
+    </div>
+
+    <!-- Search tab -->
+    <div id="tab-search" class="tab-content">
+        <div class="search-box">
+            <i class="fas fa-magnifying-glass"></i>
+            <input type="text" id="searchInput"
+                   placeholder="Search title, artist, album…"
+                   oninput="handleSearch(this.value)">
+            <button class="clear-btn" onclick="clearSearch()" title="Clear">
+                <i class="fas fa-xmark"></i>
+            </button>
+        </div>
+        <div class="scroll-list" id="search-list">
+            <div class="empty-msg"><i class="fas fa-magnifying-glass"></i><br>Type to search</div>
+        </div>
+    </div>
+
+</aside>
+
+<!-- ─── Main content ─────────────────────────────────────────────── -->
+<main class="main-content">
+
+    <!-- Error banner (hidden by default) -->
+    <div id="error-banner" class="error-banner" style="display:none">
+        <i class="fas fa-triangle-exclamation"></i>
+        <span id="error-msg">Cannot reach MPD</span>
+        <button onclick="document.getElementById('error-banner').style.display='none'">
+            <i class="fas fa-xmark"></i>
+        </button>
+    </div>
+
+    <!-- Now Playing -->
+    <section class="now-playing">
+        <div class="art-frame" id="art-frame">
+            <img id="album-art" alt="" style="display:none"
+                 onerror="this.style.display='none'; document.getElementById('art-placeholder').style.display='flex'">
+            <div class="art-placeholder" id="art-placeholder">
+                <i class="fas fa-music"></i>
+            </div>
+        </div>
+        <div class="np-meta">
+            <div class="np-title"  id="np-title">Nothing playing</div>
+            <div class="np-artist" id="np-artist">—</div>
+            <div class="np-album"  id="np-album"></div>
+        </div>
+    </section>
+
+    <!-- Player bar -->
+    <div class="player-bar">
+
+        <!-- Seek row -->
+        <div class="seek-row">
+            <span class="time-label" id="elapsed-time">0:00</span>
+            <div class="seek-track" id="seek-track">
+                <div class="seek-fill"  id="seek-fill"></div>
+                <div class="seek-thumb" id="seek-thumb"></div>
+            </div>
+            <span class="time-label" id="duration-time">0:00</span>
+        </div>
+
+        <!-- Buttons + volume row -->
+        <div class="ctrl-row">
+
+            <!-- Left: mode toggles -->
+            <div class="side-btns">
+                <button class="ctrl-btn toggle-btn" id="btn-random" onclick="sendCtrl('toggle_random')" title="Shuffle">
+                    <i class="fas fa-shuffle"></i>
+                </button>
+                <button class="ctrl-btn toggle-btn" id="btn-repeat" onclick="sendCtrl('toggle_repeat')" title="Repeat">
+                    <i class="fas fa-repeat"></i>
+                </button>
+                <button class="ctrl-btn toggle-btn" id="btn-single" onclick="sendCtrl('toggle_single')" title="Single">
+                    <span class="btn-label-text">1</span>
+                </button>
+            </div>
+
+            <!-- Center: transport -->
+            <div class="transport">
+                <button class="ctrl-btn nav-btn" onclick="sendCtrl('previous')" title="Previous">
+                    <i class="fas fa-backward-step"></i>
+                </button>
+                <button class="ctrl-btn play-btn" id="btn-play" onclick="handlePlayPause()" title="Play / Pause">
+                    <i class="fas fa-play" id="play-icon"></i>
+                </button>
+                <button class="ctrl-btn nav-btn" onclick="sendCtrl('next')" title="Next">
+                    <i class="fas fa-forward-step"></i>
+                </button>
+            </div>
+
+            <!-- Right: volume -->
+            <div class="side-btns volume-side">
+                <i class="fas fa-volume-low vol-icon" id="vol-icon" onclick="toggleMute()"></i>
+                <input type="range" class="vol-slider" id="vol-slider"
+                       min="0" max="100" value="100"
+                       oninput="onVolumeInput(this.value)">
+                <span class="vol-value" id="vol-value">100</span>
+            </div>
+        </div>
+    </div>
+
+</main>
+
+<script src="js/script.js"></script>
 </body>
 </html>

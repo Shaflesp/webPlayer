@@ -142,6 +142,10 @@ public class MPDServlet extends HttpServlet {
                     mpd.command("single " + (cur == 0 ? 1 : 0));
                 }
 
+                // Trigger an MPD database rescan (same as mpc update)
+                case "update"         -> mpd.command("update");
+                case "rescan"         -> mpd.command("rescan");   // full rescan ignoring mtime
+
                 default -> throw new IllegalArgumentException("Unknown action: " + action);
             }
             result.addProperty("ok", true);
