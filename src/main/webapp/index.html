@@ -13,7 +13,6 @@
 
 <!-- ─── Sidebar ─────────────────────────────────────────────────── -->
 <aside class="sidebar">
-
     <div class="sidebar-header">
         <div class="brand">
             <img src="images/logo.png" alt="" class="brand-logo" onerror="this.style.display='none'">
@@ -36,7 +35,7 @@
     <div id="tab-queue" class="tab-content active">
         <div class="tab-toolbar">
             <span class="toolbar-label" id="queue-count">Queue</span>
-            <button class="icon-btn" title="Clear queue"
+            <button class="icon-btn" data-tip="Clear queue"
                     onclick="sendCommand('clear').then(() => fetchQueue())">
                 <i class="fas fa-trash-can"></i>
             </button>
@@ -47,14 +46,14 @@
     <!-- Library tab -->
     <div id="tab-library" class="tab-content">
         <div class="tab-toolbar">
-            <button class="icon-btn" id="browse-back" onclick="browseBack()" title="Go back" style="display:none">
+            <button class="icon-btn" id="browse-back" onclick="browseBack()" data-tip="Go back" style="display:none">
                 <i class="fas fa-arrow-left"></i>
             </button>
             <span class="toolbar-label" id="browse-path">Library</span>
-            <button class="icon-btn" id="browse-add-all" onclick="addCurrentDir()" title="Add all to queue" style="display:none">
+            <button class="icon-btn" id="browse-add-all" onclick="addCurrentDir()" data-tip="Add all to queue" style="display:none">
                 <i class="fas fa-circle-plus"></i>
             </button>
-            <button class="icon-btn" onclick="updateDB()" title="Update MPD database">
+            <button class="icon-btn" onclick="updateDB()" data-tip="Update database">
                 <i class="fas fa-arrows-rotate"></i>
             </button>
         </div>
@@ -68,7 +67,7 @@
             <input type="text" id="searchInput"
                    placeholder="Search title, artist, album…"
                    oninput="handleSearch(this.value)">
-            <button class="clear-btn" onclick="clearSearch()" title="Clear">
+            <button class="clear-btn" onclick="clearSearch()" data-tip="Clear">
                 <i class="fas fa-xmark"></i>
             </button>
         </div>
@@ -76,13 +75,16 @@
             <div class="empty-msg"><i class="fas fa-magnifying-glass"></i><br>Type to search</div>
         </div>
     </div>
-
 </aside>
 
 <!-- ─── Main content ─────────────────────────────────────────────── -->
 <main class="main-content">
 
-    <!-- Error banner (hidden by default) -->
+    <!-- Full-bleed background art -->
+    <div class="bg-art"     id="bg-art"></div>
+    <div class="bg-overlay" id="bg-overlay"></div>
+
+    <!-- Error banner -->
     <div id="error-banner" class="error-banner" style="display:none">
         <i class="fas fa-triangle-exclamation"></i>
         <span id="error-msg">Cannot reach MPD</span>
@@ -93,13 +95,43 @@
 
     <!-- Now Playing -->
     <section class="now-playing">
-        <div class="art-frame" id="art-frame">
-            <img id="album-art" alt="" style="display:none"
-                 onerror="this.style.display='none'; document.getElementById('art-placeholder').style.display='flex'">
-            <div class="art-placeholder" id="art-placeholder">
-                <i class="fas fa-music"></i>
+
+        <!-- Vinyl disc -->
+        <div class="vinyl-wrap">
+            <!-- Decorative tonearm -->
+            <div class="tonearm">
+                <svg viewBox="0 0 60 160" fill="none" xmlns="http://www.w3.org/2000/svg">
+                    <!-- Pivot base -->
+                    <circle cx="48" cy="12" r="8" fill="#2a2a2a" stroke="#444" stroke-width="1.5"/>
+                    <circle cx="48" cy="12" r="3" fill="#555"/>
+                    <!-- Arm shaft -->
+                    <line x1="48" y1="20" x2="12" y2="148"
+                          stroke="#3a3a3a" stroke-width="3" stroke-linecap="round"/>
+                    <!-- Headshell -->
+                    <rect x="5" y="144" width="14" height="5" rx="2"
+                          fill="#2a2a2a" stroke="#444" stroke-width="1"/>
+                    <!-- Stylus -->
+                    <line x1="12" y1="149" x2="12" y2="156"
+                          stroke="#555" stroke-width="1.5" stroke-linecap="round"/>
+                </svg>
+            </div>
+
+            <div class="vinyl" id="vinyl-disc">
+                <!-- Cover art circle -->
+                <div class="vinyl-art" id="vinyl-art">
+                    <img id="vinyl-img" alt="" style="display:none"
+                         onerror="this.style.display='none';
+                                  document.getElementById('vinyl-placeholder').style.display='flex'">
+                    <div class="art-placeholder" id="vinyl-placeholder">
+                        <i class="fas fa-music"></i>
+                    </div>
+                </div>
+                <!-- Spindle -->
+                <div class="vinyl-hole"></div>
             </div>
         </div>
+
+        <!-- Track info -->
         <div class="np-meta">
             <div class="np-title"  id="np-title">Nothing playing</div>
             <div class="np-artist" id="np-artist">—</div>
@@ -109,8 +141,6 @@
 
     <!-- Player bar -->
     <div class="player-bar">
-
-        <!-- Seek row -->
         <div class="seek-row">
             <span class="time-label" id="elapsed-time">0:00</span>
             <div class="seek-track" id="seek-track">
@@ -120,38 +150,33 @@
             <span class="time-label" id="duration-time">0:00</span>
         </div>
 
-        <!-- Buttons + volume row -->
         <div class="ctrl-row">
-
-            <!-- Left: mode toggles -->
             <div class="side-btns">
-                <button class="ctrl-btn toggle-btn" id="btn-random" onclick="sendCtrl('toggle_random')" title="Shuffle">
+                <button class="ctrl-btn toggle-btn" id="btn-random" onclick="sendCtrl('toggle_random')" data-tip="Shuffle">
                     <i class="fas fa-shuffle"></i>
                 </button>
-                <button class="ctrl-btn toggle-btn" id="btn-repeat" onclick="sendCtrl('toggle_repeat')" title="Repeat">
+                <button class="ctrl-btn toggle-btn" id="btn-repeat" onclick="sendCtrl('toggle_repeat')" data-tip="Repeat">
                     <i class="fas fa-repeat"></i>
                 </button>
-                <button class="ctrl-btn toggle-btn" id="btn-single" onclick="sendCtrl('toggle_single')" title="Single">
+                <button class="ctrl-btn toggle-btn" id="btn-single" onclick="sendCtrl('toggle_single')" data-tip="Single">
                     <span class="btn-label-text">1</span>
                 </button>
             </div>
 
-            <!-- Center: transport -->
             <div class="transport">
-                <button class="ctrl-btn nav-btn" onclick="sendCtrl('previous')" title="Previous">
+                <button class="ctrl-btn nav-btn" onclick="sendCtrl('previous')" data-tip="Previous">
                     <i class="fas fa-backward-step"></i>
                 </button>
-                <button class="ctrl-btn play-btn" id="btn-play" onclick="handlePlayPause()" title="Play / Pause">
+                <button class="ctrl-btn play-btn" id="btn-play" onclick="handlePlayPause()" data-tip="Play / Pause">
                     <i class="fas fa-play" id="play-icon"></i>
                 </button>
-                <button class="ctrl-btn nav-btn" onclick="sendCtrl('next')" title="Next">
+                <button class="ctrl-btn nav-btn" onclick="sendCtrl('next')" data-tip="Next">
                     <i class="fas fa-forward-step"></i>
                 </button>
             </div>
 
-            <!-- Right: volume -->
             <div class="side-btns volume-side">
-                <i class="fas fa-volume-low vol-icon" id="vol-icon" onclick="toggleMute()"></i>
+                <i class="fas fa-volume-low vol-icon" id="vol-icon" onclick="toggleMute()" data-tip="Mute"></i>
                 <input type="range" class="vol-slider" id="vol-slider"
                        min="0" max="100" value="100"
                        oninput="onVolumeInput(this.value)">

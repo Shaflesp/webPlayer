@@ -1,11 +1,6 @@
 /* ═══════════════════════════════════════════════════════════════════════════
    WebPlayer — MPD control frontend
-   ─────────────────────────────────────────────────────────────────────────
-   The browser is a PURE CONTROL INTERFACE.
-   MPD plays audio through the system (PipeWire/ALSA) — no audio element,
-   no double output, no stream conflicts.
-
-   Seek bar and elapsed time are driven by polling MPD's status every second.
+   Pure control interface — no audio element, MPD plays through the system.
    ═══════════════════════════════════════════════════════════════════════════ */
 
 const POLL_MS = 1000;
@@ -23,7 +18,7 @@ let browseUri   = '';
 let isSeeking   = false;
 let prevVolume  = 100;
 let searchTimer = null;
-let lastArtFile = null;   // track when the song changes to reload art
+let lastArtFile = null;
 
 /* ── DOM refs ───────────────────────────────────────────────────────────── */
 const playIcon  = document.getElementById('play-icon');
@@ -33,6 +28,8 @@ const seekThumb = document.getElementById('seek-thumb');
 const volSlider = document.getElementById('vol-slider');
 const volValue  = document.getElementById('vol-value');
 const volIcon   = document.getElementById('vol-icon');
+const vinylDisc = document.getElementById('vinyl-disc');
+const bgArt     = document.getElementById('bg-art');
 
 /* ── API helpers ────────────────────────────────────────────────────────── */
 
@@ -72,6 +69,7 @@ async function poll() {
 
         updateNowPlaying();
         updateControls();
+        updateVinyl();
 
         if (activeTab === 'queue' &&
             (status.songid !== prevSongId || status.playlistlength !== prevQueueLen)) {
@@ -97,25 +95,29 @@ function updateNowPlaying() {
         ? `${title} — ${artist}`
         : 'WebPlayer — MPD';
 
-    // Reload album art only when the file actually changes
     if (currentSong.file !== lastArtFile) {
         lastArtFile = currentSong.file;
-        updateAlbumArt(currentSong.file);
+        updateArt(currentSong.file);
     }
 }
 
-/* ── Album art ──────────────────────────────────────────────────────────── */
+/* ── Art: vinyl + blurred bg ────────────────────────────────────────────── */
 
-function updateAlbumArt(file) {
-    const img         = document.getElementById('album-art');
-    const placeholder = document.getElementById('art-placeholder');
+function updateArt(file) {
+    const img         = document.getElementById('vinyl-img');
+    const placeholder = document.getElementById('vinyl-placeholder');
 
     if (!file) {
         img.style.display         = 'none';
         placeholder.style.display = 'flex';
+        bgArt.style.backgroundImage = '';
+        bgArt.classList.remove('visible');
         return;
     }
 
+    const artUrl = 'ArtServlet?uri=' + encodeURIComponent(file);
+
+    // Vinyl center art
     img.onload = () => {
         img.style.display         = 'block';
         placeholder.style.display = 'none';
@@ -124,15 +126,31 @@ function updateAlbumArt(file) {
         img.style.display         = 'none';
         placeholder.style.display = 'flex';
     };
-    // Cache-bust is unnecessary — ArtServlet handles ETags properly
-    img.src = 'ArtServlet?uri=' + encodeURIComponent(file);
+    img.src = artUrl;
+
+    // Full-bleed background — probe first so we only show it when art exists
+    const probe = new Image();
+    probe.onload = () => {
+        bgArt.style.backgroundImage = `url('${artUrl}')`;
+        bgArt.classList.add('visible');
+    };
+    probe.onerror = () => {
+        bgArt.style.backgroundImage = '';
+        bgArt.classList.remove('visible');
+    };
+    probe.src = artUrl;
+}
+
+/* ── Vinyl spin state ───────────────────────────────────────────────────── */
+
+function updateVinyl() {
+    vinylDisc.classList.toggle('playing', status.state === 'play');
 }
 
 /* ── Controls ───────────────────────────────────────────────────────────── */
 
 function updateControls() {
-    const playing = status.state === 'play';
-    playIcon.className = playing ? 'fas fa-pause' : 'fas fa-play';
+    playIcon.className = status.state === 'play' ? 'fas fa-pause' : 'fas fa-play';
 
     if (!isSeeking) {
         const pct = status.duration > 0 ? (status.elapsed / status.duration) * 100 : 0;
@@ -163,9 +181,8 @@ async function handlePlayPause() {
 /* ── Queue ──────────────────────────────────────────────────────────────── */
 
 async function fetchQueue() {
-    try {
-        renderQueue(await api('queue'));
-    } catch (e) { console.error('fetchQueue:', e); }
+    try { renderQueue(await api('queue')); }
+    catch (e) { console.error('fetchQueue:', e); }
 }
 
 function renderQueue(songs) {
@@ -186,17 +203,34 @@ function renderQueue(songs) {
 
         const div = document.createElement('div');
         div.className = 'list-item' + (isPlaying ? ' playing' : '');
+
+        // Thumbnail: try ArtServlet, fall back to number
+        const thumbHtml = song.file
+            ? `<div class="item-thumb">
+                   <img src="ArtServlet?uri=${encodeURIComponent(song.file)}" alt=""
+                        onerror="this.style.display='none';
+                                 this.nextElementSibling.style.display='flex'">
+                   <div class="thumb-fallback" style="display:none">
+                       <span class="item-num">${pos + 1}</span>
+                   </div>
+                   <div class="playing-overlay">
+                       <i class="fas fa-volume-high"></i>
+                   </div>
+               </div>`
+            : `<div class="item-thumb">
+                   <div class="thumb-fallback">
+                       <span class="item-num">${pos + 1}</span>
+                   </div>
+                   ${isPlaying ? '<div class="playing-overlay"><i class="fas fa-volume-high"></i></div>' : ''}
+               </div>`;
+
         div.innerHTML = `
-            <div class="item-icon">
-                ${isPlaying
-            ? '<i class="fas fa-volume-high"></i>'
-            : `<span class="item-num">${pos + 1}</span>`}
-            </div>
+            ${thumbHtml}
             <div class="item-info">
                 <span class="item-title">${esc(title)}</span>
                 <span class="item-sub">${esc(artist)}</span>
             </div>
-            <button class="item-remove" title="Remove from queue">
+            <button class="item-remove" data-tip="Remove">
                 <i class="fas fa-xmark"></i>
             </button>`;
 
@@ -259,20 +293,19 @@ function renderBrowse(items, uri) {
         if (item._type === 'directory') {
             const name = basename(item.directory);
             div.innerHTML = `
-                <div class="item-icon"><i class="fas fa-folder"></i></div>
+                <div class="item-thumb">
+                    <i class="fas fa-folder"></i>
+                </div>
                 <div class="item-info"><span class="item-title">${esc(name)}</span></div>
                 <i class="fas fa-chevron-right item-chevron"></i>`;
-            div.addEventListener('click', () => {
-                browseStack.push(uri);
-                fetchBrowse(item.directory);
-            });
+            div.addEventListener('click', () => { browseStack.push(uri); fetchBrowse(item.directory); });
 
         } else if (item._type === 'playlist') {
             const name = item.playlist.split('/').pop();
             div.innerHTML = `
-                <div class="item-icon"><i class="fas fa-list-music"></i></div>
+                <div class="item-thumb"><i class="fas fa-list-music"></i></div>
                 <div class="item-info"><span class="item-title">${esc(name)}</span></div>
-                <button class="item-add" title="Load playlist"><i class="fas fa-plus"></i></button>`;
+                <button class="item-add" data-tip="Add to queue"><i class="fas fa-plus"></i></button>`;
             div.querySelector('.item-add').addEventListener('click', e => {
                 e.stopPropagation();
                 sendCommand('add', { uri: item.playlist }).then(() => {
@@ -285,12 +318,19 @@ function renderBrowse(items, uri) {
             const title  = item.Title  || basename(item.file) || '?';
             const artist = item.Artist || item.AlbumArtist    || '';
             div.innerHTML = `
-                <div class="item-icon"><i class="fas fa-music"></i></div>
+                <div class="item-thumb">
+                    <img src="ArtServlet?uri=${encodeURIComponent(item.file)}" alt=""
+                         onerror="this.style.display='none';
+                                  this.nextElementSibling.style.display='flex'">
+                    <div class="thumb-fallback" style="display:none">
+                        <i class="fas fa-music"></i>
+                    </div>
+                </div>
                 <div class="item-info">
                     <span class="item-title">${esc(title)}</span>
                     <span class="item-sub">${esc(artist)}</span>
                 </div>
-                <button class="item-add" title="Add to queue"><i class="fas fa-plus"></i></button>`;
+                <button class="item-add" data-tip="Add to queue"><i class="fas fa-plus"></i></button>`;
 
             div.addEventListener('dblclick', async () => {
                 await sendCommand('addplay', { uri: item.file });
@@ -356,12 +396,19 @@ function renderSearch(songs) {
         const div = document.createElement('div');
         div.className = 'list-item';
         div.innerHTML = `
-            <div class="item-icon"><i class="fas fa-music"></i></div>
+            <div class="item-thumb">
+                <img src="ArtServlet?uri=${encodeURIComponent(song.file)}" alt=""
+                     onerror="this.style.display='none';
+                              this.nextElementSibling.style.display='flex'">
+                <div class="thumb-fallback" style="display:none">
+                    <i class="fas fa-music"></i>
+                </div>
+            </div>
             <div class="item-info">
                 <span class="item-title">${esc(title)}</span>
                 <span class="item-sub">${esc(sub)}</span>
             </div>
-            <button class="item-add" title="Add to queue"><i class="fas fa-plus"></i></button>`;
+            <button class="item-add" data-tip="Add to queue"><i class="fas fa-plus"></i></button>`;
 
         div.addEventListener('dblclick', async () => {
             await sendCommand('addplay', { uri: song.file });
@@ -436,16 +483,10 @@ function onVolumeInput(v) {
     updateVolIcon(vol);
     sendCommand('setvol', { volume: vol });
 }
-
 function toggleMute() {
-    if (status.volume > 0) {
-        prevVolume = status.volume;
-        sendCommand('setvol', { volume: 0 }).then(poll);
-    } else {
-        sendCommand('setvol', { volume: prevVolume || 80 }).then(poll);
-    }
+    if (status.volume > 0) { prevVolume = status.volume; sendCommand('setvol', { volume: 0 }).then(poll); }
+    else sendCommand('setvol', { volume: prevVolume || 80 }).then(poll);
 }
-
 function updateVolIcon(vol) {
     volIcon.className =
         vol === 0 ? 'fas fa-volume-xmark vol-icon' :
@@ -455,13 +496,8 @@ function updateVolIcon(vol) {
 
 /* ── Error banner ───────────────────────────────────────────────────────── */
 
-function showError(msg) {
-    setText('error-msg', msg);
-    document.getElementById('error-banner').style.display = 'flex';
-}
-function hideError() {
-    document.getElementById('error-banner').style.display = 'none';
-}
+function showError(msg) { setText('error-msg', msg); document.getElementById('error-banner').style.display = 'flex'; }
+function hideError()    { document.getElementById('error-banner').style.display = 'none'; }
 
 /* ── Keyboard shortcuts ─────────────────────────────────────────────────── */
 
@@ -491,16 +527,11 @@ function basename(path) {
 }
 function esc(str) {
     return String(str ?? '')
-        .replace(/&/g, '&amp;').replace(/</g, '&lt;')
-        .replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+        .replace(/&/g,'&amp;').replace(/</g,'&lt;')
+        .replace(/>/g,'&gt;').replace(/"/g,'&quot;');
 }
-function setText(id, text) {
-    const el = document.getElementById(id);
-    if (el) el.textContent = text;
-}
-function toggleActive(id, on) {
-    document.getElementById(id)?.classList.toggle('active', on);
-}
+function setText(id, text) { const el = document.getElementById(id); if (el) el.textContent = text; }
+function toggleActive(id, on) { document.getElementById(id)?.classList.toggle('active', on); }
 
 /* ── Init ───────────────────────────────────────────────────────────────── */
 
