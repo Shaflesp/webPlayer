@@ -17,6 +17,9 @@
         <div class="brand">
             <img src="images/logo.png" alt="" class="brand-logo" onerror="this.style.display='none'">
             <span>WebPlayer</span>
+            <button class="icon-btn" style="margin-left:auto" onclick="openSettings()" data-tip="Settings">
+                <i class="fas fa-gear"></i>
+            </button>
         </div>
         <div class="tab-bar">
             <button class="tab active" data-tab="queue"   onclick="switchTab('queue')">
@@ -98,24 +101,10 @@
 
         <!-- Vinyl disc -->
         <div class="vinyl-wrap">
-            <!-- Decorative tonearm -->
-            <div class="tonearm">
-                <svg viewBox="0 0 60 160" fill="none" xmlns="http://www.w3.org/2000/svg">
-                    <!-- Pivot base -->
-                    <circle cx="48" cy="12" r="8" fill="#2a2a2a" stroke="#444" stroke-width="1.5"/>
-                    <circle cx="48" cy="12" r="3" fill="#555"/>
-                    <!-- Arm shaft -->
-                    <line x1="48" y1="20" x2="12" y2="148"
-                          stroke="#3a3a3a" stroke-width="3" stroke-linecap="round"/>
-                    <!-- Headshell -->
-                    <rect x="5" y="144" width="14" height="5" rx="2"
-                          fill="#2a2a2a" stroke="#444" stroke-width="1"/>
-                    <!-- Stylus -->
-                    <line x1="12" y1="149" x2="12" y2="156"
-                          stroke="#555" stroke-width="1.5" stroke-linecap="round"/>
-                </svg>
-            </div>
+            <!-- Visualizer canvas — rendered behind the disc (z-index 0) -->
+            <canvas id="viz-canvas"></canvas>
 
+            <!-- Disc — z-index 1 -->
             <div class="vinyl" id="vinyl-disc">
                 <!-- Cover art circle -->
                 <div class="vinyl-art" id="vinyl-art">
@@ -125,9 +114,23 @@
                     <div class="art-placeholder" id="vinyl-placeholder">
                         <i class="fas fa-music"></i>
                     </div>
+                    <!-- Spindle inside art circle — hidden until art loads -->
+                    <div class="vinyl-hole" id="vinyl-hole" style="display:none"></div>
                 </div>
-                <!-- Spindle -->
-                <div class="vinyl-hole"></div>
+            </div>
+
+            <!-- Tonearm — AFTER disc in DOM = z-index 2 = on top of disc -->
+            <div class="tonearm">
+                <svg viewBox="0 0 60 160" fill="none" xmlns="http://www.w3.org/2000/svg">
+                    <circle cx="48" cy="12" r="8" fill="#2a2a2a" stroke="#444" stroke-width="1.5"/>
+                    <circle cx="48" cy="12" r="3" fill="#555"/>
+                    <line x1="48" y1="20" x2="12" y2="148"
+                          stroke="#3a3a3a" stroke-width="3" stroke-linecap="round"/>
+                    <rect x="5" y="144" width="14" height="5" rx="2"
+                          fill="#2a2a2a" stroke="#444" stroke-width="1"/>
+                    <line x1="12" y1="149" x2="12" y2="156"
+                          stroke="#555" stroke-width="1.5" stroke-linecap="round"/>
+                </svg>
             </div>
         </div>
 
@@ -141,6 +144,8 @@
 
     <!-- Player bar -->
     <div class="player-bar">
+        <!-- Frequency bar visualizer canvas — z-index 0, behind all controls -->
+        <canvas id="bar-canvas"></canvas>
         <div class="seek-row">
             <span class="time-label" id="elapsed-time">0:00</span>
             <div class="seek-track" id="seek-track">
@@ -188,5 +193,111 @@
 </main>
 
 <script src="js/script.js"></script>
+
+<!-- ─── Settings panel ────────────────────────────────────────────── -->
+<div class="settings-backdrop" id="settings-backdrop" onclick="closeSettings()"></div>
+
+<div class="settings-panel" id="settings-panel">
+    <div class="settings-header">
+        <span><i class="fas fa-gear"></i> Settings</span>
+        <button class="icon-btn" onclick="closeSettings()" data-tip="Close">
+            <i class="fas fa-xmark"></i>
+        </button>
+    </div>
+
+    <div class="settings-body">
+
+        <!-- Connection -->
+        <div class="settings-section">
+            <h3>Connection</h3>
+            <div class="settings-field">
+                <label>MPD host</label>
+                <input type="text" id="s-mpd-host" placeholder="localhost">
+            </div>
+            <div class="settings-field">
+                <label>MPD port</label>
+                <input type="number" id="s-mpd-port" placeholder="6600" min="1" max="65535">
+            </div>
+            <div class="settings-field">
+                <label>Music directory</label>
+                <input type="text" id="s-music-dir" placeholder="~/Music">
+            </div>
+            <div class="settings-actions">
+                <button class="btn-secondary" onclick="testConn()">
+                    <i class="fas fa-plug"></i> Test
+                </button>
+                <button class="btn-primary" onclick="saveConn()">
+                    <i class="fas fa-floppy-disk"></i> Save
+                </button>
+            </div>
+            <div class="conn-status" id="conn-status"></div>
+        </div>
+
+        <!-- Playback -->
+        <div class="settings-section">
+            <h3>Playback</h3>
+            <div class="settings-row">
+                <label>Pause on close</label>
+                <button class="toggle-switch" id="tog-pause-close"
+                        onclick="toggleSetting('player.pauseOnClose', this)"></button>
+            </div>
+        </div>
+
+        <!-- Appearance -->
+        <div class="settings-section">
+            <h3>Appearance</h3>
+            <div class="settings-field">
+                <label>Accent colour</label>
+                <input type="color" id="s-accent" value="#7c3aed"
+                       oninput="previewAccent(this.value)"
+                       onchange="saveSetting('ui.accentColor', this.value)">
+            </div>
+            <div class="settings-field">
+                <label>Vinyl speed</label>
+                <div class="slider-row">
+                    <input type="range" id="s-vinyl-speed" min="2" max="20" step="1" value="6"
+                           oninput="previewVinylSpeed(this.value)"
+                           onchange="saveSetting('ui.vinylSpeed', this.value)">
+                    <span id="s-vinyl-speed-val">6 s/rev</span>
+                </div>
+            </div>
+            <div class="settings-field">
+                <label>Background blur opacity</label>
+                <div class="slider-row">
+                    <input type="range" id="s-bg-opacity" min="0" max="40" step="5" value="18"
+                           oninput="previewBgOpacity(this.value)"
+                           onchange="saveSetting('ui.bgOpacity', (this.value/100).toFixed(2))">
+                    <span id="s-bg-opacity-val">18 %</span>
+                </div>
+            </div>
+        </div>
+
+        <!-- Visualizer -->
+        <div class="settings-section">
+            <h3>Visualizer</h3>
+            <div class="settings-field">
+                <label>Mode</label>
+                <div class="viz-mode-btns" id="viz-mode-btns">
+                    <button class="viz-mode-btn active" data-mode="ellipse" onclick="setVizMode('ellipse')">
+                        <i class="fas fa-circle-notch"></i> Ellipse
+                    </button>
+                    <button class="viz-mode-btn" data-mode="bar" onclick="setVizMode('bar')">
+                        <i class="fas fa-chart-simple"></i> Bar
+                    </button>
+                    <button class="viz-mode-btn" data-mode="off" onclick="setVizMode('off')">
+                        <i class="fas fa-ban"></i> Off
+                    </button>
+                </div>
+            </div>
+            <div class="settings-field">
+                <label>MPD stream URL <span style="color:var(--text-dim);font-size:10px">(optional — for real FFT)</span></label>
+                <input type="text" id="s-stream-url" placeholder="http://localhost:8000"
+                       onchange="saveStreamUrl(this.value)">
+            </div>
+        </div>
+
+    </div>
+</div>
+
 </body>
 </html>

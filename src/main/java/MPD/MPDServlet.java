@@ -35,11 +35,7 @@ import java.util.*;
 @WebServlet("/MPDServlet")
 public class MPDServlet extends HttpServlet {
 
-    // ── Configuration ─────────────────────────────────────────────────────────
-    //   Override these via context-param in web.xml if needed.
-    private static final String MPD_HOST     = "localhost";
-    private static final int    MPD_PORT     = 6600;
-    private static final int    SEARCH_LIMIT = 200;
+    private static final int SEARCH_LIMIT = 200;
 
     private static final Gson GSON = new GsonBuilder().create();
 
@@ -54,7 +50,7 @@ public class MPDServlet extends HttpServlet {
         String action = req.getParameter("action");
         if (action == null) action = "nowplaying";
 
-        try (MPDClient mpd = new MPDClient(MPD_HOST, MPD_PORT)) {
+        try (MPDClient mpd = new MPDClient(AppConfig.get("mpd.host"), AppConfig.getInt("mpd.port"))) {
             JsonElement result = switch (action) {
                 case "nowplaying"  -> nowPlaying(mpd);
                 case "status"      -> mapToJson(mpd.commandAsMap("status"));
@@ -85,7 +81,7 @@ public class MPDServlet extends HttpServlet {
 
         JsonObject result = new JsonObject();
 
-        try (MPDClient mpd = new MPDClient(MPD_HOST, MPD_PORT)) {
+        try (MPDClient mpd = new MPDClient(AppConfig.get("mpd.host"), AppConfig.getInt("mpd.port"))) {
             switch (action) {
                 case "play"           -> mpd.command("play");
                 case "pause"          -> mpd.command("pause 1");

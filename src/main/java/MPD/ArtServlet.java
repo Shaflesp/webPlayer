@@ -27,18 +27,8 @@ import java.util.List;
 public class ArtServlet extends HttpServlet {
 
     // ── Config ────────────────────────────────────────────────────────────────
-    private static final String MUSIC_DIR;
-    private static final String MPD_HOST = "localhost";
+    private static final String MPD_HOST = "localhost"; // fallback only
     private static final int    MPD_PORT = 6600;
-
-    static {
-        String dir = System.getenv("MPD_MUSIC_DIR");
-        if (dir == null || dir.isBlank())
-            dir = System.getProperty("user.home") + "/Music";
-        if (dir.startsWith("~/") || dir.equals("~"))
-            dir = System.getProperty("user.home") + dir.substring(1);
-        MUSIC_DIR = dir;
-    }
 
     // Cover art filenames to probe (case-insensitive, filesystem-first)
     private static final List<String> STEMS = List.of(
@@ -56,7 +46,7 @@ public class ArtServlet extends HttpServlet {
         if (uri == null || uri.isBlank()) { res.sendError(400); return; }
 
         // Path traversal guard
-        Path base = Path.of(MUSIC_DIR).normalize();
+        Path base = Path.of(AppConfig.expandHome(AppConfig.get("music.dir"))).normalize();
         Path song = base.resolve(uri).normalize();
         if (!song.startsWith(base)) { res.sendError(403); return; }
 
@@ -131,7 +121,7 @@ public class ArtServlet extends HttpServlet {
      * size, then readFully for the binary block.
      */
     private byte[] fetchMpdArt(String songUri, String cmd) {
-        try (Socket socket = new Socket(MPD_HOST, MPD_PORT)) {
+        try (Socket socket = new Socket(AppConfig.get("mpd.host"), AppConfig.getInt("mpd.port"))) {
             socket.setSoTimeout(5_000);
             InputStream  in  = socket.getInputStream();
             OutputStream out = socket.getOutputStream();

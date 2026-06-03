@@ -5,6 +5,10 @@
 
 const POLL_MS = 1000;
 
+/* ── App settings (loaded from ConfigServlet) ───────────────────────────── */
+let appSettings = {};
+let pollIntervalId = null;
+
 /* ── State ──────────────────────────────────────────────────────────────── */
 let status = {
     state: 'stop', elapsed: 0, duration: 0,
@@ -30,6 +34,204 @@ const volValue  = document.getElementById('vol-value');
 const volIcon   = document.getElementById('vol-icon');
 const vinylDisc = document.getElementById('vinyl-disc');
 const bgArt     = document.getElementById('bg-art');
+
+/* ── Visualizer ─────────────────────────────────────────────────────────── */
+
+function hexToRgb(hex) {
+    hex = (hex || '#7c3aed').replace('#', '');
+    if (hex.length === 3) hex = hex.split('').map(c => c + c).join('');
+    const n = parseInt(hex, 16);
+    return [(n >> 16) & 255, (n >> 8) & 255, n & 255];
+}
+
+const Visualizer = {
+    mode:      'ellipse',
+    analyser:  null,
+    dataArray: null,
+    animId:    null,
+    simPhase:  0,
+    simDecay:  0,
+    vizCanvas: null,
+    barCanvas: null,
+
+    init(streamUrl, mode) {
+        this.mode      = mode || 'ellipse';
+        this.vizCanvas = document.getElementById('viz-canvas');
+        this.barCanvas = document.getElementById('bar-canvas');
+        this.resize();
+        window.addEventListener('resize', () => this.resize());
+        if (streamUrl && streamUrl.trim()) this.connectStream(streamUrl.trim());
+        this.start();
+    },
+
+    resize() {
+        const vinyl = document.getElementById('vinyl-disc');
+        if (vinyl && this.vizCanvas) {
+            const sz = Math.round(vinyl.offsetWidth * 1.72);
+            this.vizCanvas.width  = sz;
+            this.vizCanvas.height = sz;
+        }
+        const bar = document.querySelector('.player-bar');
+        if (bar && this.barCanvas) {
+            this.barCanvas.width  = bar.clientWidth;
+            this.barCanvas.height = bar.clientHeight;
+        }
+    },
+
+    connectStream(url) {
+        try {
+            const AC  = window.AudioContext || window.webkitAudioContext;
+            if (!AC) return;
+            const ctx = new AC();
+            this.analyser = ctx.createAnalyser();
+            this.analyser.fftSize = 1024;
+            this.analyser.smoothingTimeConstant = 0.82;
+            this.dataArray = new Uint8Array(this.analyser.frequencyBinCount);
+
+            const el = new Audio(url);
+            el.muted       = true;
+            el.crossOrigin = 'anonymous';
+            const src = ctx.createMediaElementSource(el);
+            src.connect(this.analyser);
+            // ↑ NOT connected to ctx.destination → no browser audio output
+            el.play().catch(() => { this.analyser = null; });
+        } catch (e) {
+            this.analyser = null;
+        }
+    },
+
+    /* Returns Float32Array[N] in 0..1 */
+    getData(N) {
+        if (this.analyser && this.dataArray) {
+            this.analyser.getByteFrequencyData(this.dataArray);
+            const out   = new Float32Array(N);
+            const ratio = this.dataArray.length / N;
+            for (let i = 0; i < N; i++)
+                out[i] = this.dataArray[Math.floor(i * ratio)] / 255;
+            return out;
+        }
+        return this.simulate(N);
+    },
+
+    simulate(N) {
+        const playing = (status.state === 'play');
+        this.simDecay = playing
+            ? Math.min(1, this.simDecay + 0.06)
+            : Math.max(0, this.simDecay - 0.025);
+        if (this.simDecay === 0) return new Float32Array(N);
+        this.simPhase += 0.038;
+        const d = new Float32Array(N);
+        for (let i = 0; i < N; i++) {
+            const t    = i / N;
+            const bass = Math.exp(-t * 11)  * (0.55 + 0.4  * Math.sin(this.simPhase * 2.3));
+            const mid  = Math.exp(-((t - 0.22) ** 2) / 0.009) * 0.52;
+            const high = Math.exp(-((t - 0.52) ** 2) / 0.028) * 0.22;
+            const beat = Math.exp(-t * 7)   * Math.abs(Math.sin(this.simPhase * 3.1)) * 0.28;
+            const noise= (Math.random() - 0.5) * 0.09;
+            d[i] = Math.max(0, Math.min(1, (bass + mid + high + beat + noise) * this.simDecay));
+        }
+        return d;
+    },
+
+    start() {
+        if (this.animId) cancelAnimationFrame(this.animId);
+        const loop = () => { this.draw(); this.animId = requestAnimationFrame(loop); };
+        loop();
+    },
+
+    stop() {
+        if (this.animId) { cancelAnimationFrame(this.animId); this.animId = null; }
+        this.clearAll();
+    },
+
+    draw() {
+        if (this.mode === 'off') { this.clearAll(); return; }
+        const [r, g, b] = hexToRgb(
+            getComputedStyle(document.documentElement).getPropertyValue('--accent').trim()
+        );
+        if (this.mode === 'ellipse') {
+            this.drawEllipse(r, g, b);
+            this.clearCanvas(this.barCanvas);
+        } else {
+            this.clearCanvas(this.vizCanvas);
+            this.drawBar(r, g, b);
+        }
+    },
+
+    drawEllipse(r, g, b) {
+        const cv = this.vizCanvas;
+        if (!cv) return;
+        const ctx = cv.getContext('2d');
+        const W = cv.width, H = cv.height, cx = W / 2, cy = H / 2;
+        ctx.clearRect(0, 0, W, H);
+
+        const N      = 220;
+        const data   = this.getData(N);
+        const rx     = W * 0.425;   // slightly wider than tall → ellipse feel
+        const ry     = H * 0.405;
+        const maxBar = Math.min(W, H) * 0.17;
+
+        // Faint base ellipse
+        ctx.beginPath();
+        ctx.ellipse(cx, cy, rx, ry, 0, 0, Math.PI * 2);
+        ctx.strokeStyle = `rgba(${r},${g},${b},0.13)`;
+        ctx.lineWidth = 1;
+        ctx.stroke();
+
+        ctx.shadowColor = `rgba(${r},${g},${b},0.55)`;
+
+        for (let i = 0; i < N; i++) {
+            const amp   = data[i];
+            if (amp < 0.01) continue;
+            const angle  = (i / N) * Math.PI * 2 - Math.PI / 2;
+            const barLen = amp * maxBar;
+            const bx = cx + rx * Math.cos(angle);
+            const by = cy + ry * Math.sin(angle);
+            const ex = bx + Math.cos(angle) * barLen;
+            const ey = by + Math.sin(angle) * barLen;
+
+            ctx.shadowBlur   = 4 + amp * 10;
+            ctx.beginPath();
+            ctx.moveTo(bx, by);
+            ctx.lineTo(ex, ey);
+            ctx.strokeStyle = `rgba(${r},${g},${b},${0.25 + amp * 0.75})`;
+            ctx.lineWidth   = 1.2 + amp * 2.2;
+            ctx.stroke();
+        }
+        ctx.shadowBlur = 0;
+    },
+
+    drawBar(r, g, b) {
+        const cv = this.barCanvas;
+        if (!cv) return;
+        const ctx = cv.getContext('2d');
+        const W = cv.width, H = cv.height;
+        ctx.clearRect(0, 0, W, H);
+
+        const N    = 90;
+        const data = this.getData(N);
+        const barW = W / N;
+
+        for (let i = 0; i < N; i++) {
+            const amp  = data[i];
+            if (amp < 0.01) continue;
+            const barH = amp * H * 0.68;
+            ctx.fillStyle = `rgba(${r},${g},${b},${0.12 + amp * 0.32})`;
+            ctx.fillRect(i * barW, H - barH, Math.max(1, barW - 0.8), barH);
+        }
+    },
+
+    clearAll()         { this.clearCanvas(this.vizCanvas); this.clearCanvas(this.barCanvas); },
+    clearCanvas(cv)    { if (cv) cv.getContext('2d').clearRect(0, 0, cv.width, cv.height); },
+
+    setMode(mode) {
+        this.mode = mode;
+        // Update active state of mode buttons
+        document.querySelectorAll('.viz-mode-btn').forEach(b =>
+            b.classList.toggle('active', b.dataset.mode === mode));
+        if (mode === 'off') this.clearAll();
+    }
+};
 
 /* ── API helpers ────────────────────────────────────────────────────────── */
 
@@ -106,10 +308,12 @@ function updateNowPlaying() {
 function updateArt(file) {
     const img         = document.getElementById('vinyl-img');
     const placeholder = document.getElementById('vinyl-placeholder');
+    const hole        = document.getElementById('vinyl-hole');
 
     if (!file) {
         img.style.display         = 'none';
         placeholder.style.display = 'flex';
+        if (hole) hole.style.display = 'none';
         bgArt.style.backgroundImage = '';
         bgArt.classList.remove('visible');
         return;
@@ -117,18 +321,20 @@ function updateArt(file) {
 
     const artUrl = 'ArtServlet?uri=' + encodeURIComponent(file);
 
-    // Vinyl center art
+    // Vinyl centre art
     img.onload = () => {
         img.style.display         = 'block';
         placeholder.style.display = 'none';
+        if (hole) hole.style.display = 'block'; // show hole only when art is visible
     };
     img.onerror = () => {
         img.style.display         = 'none';
         placeholder.style.display = 'flex';
+        if (hole) hole.style.display = 'none';  // keep hole hidden over placeholder
     };
     img.src = artUrl;
 
-    // Full-bleed background — probe first so we only show it when art exists
+    // Full-bleed background — probe first; only show when art exists
     const probe = new Image();
     probe.onload = () => {
         bgArt.style.backgroundImage = `url('${artUrl}')`;
@@ -533,12 +739,163 @@ function esc(str) {
 function setText(id, text) { const el = document.getElementById(id); if (el) el.textContent = text; }
 function toggleActive(id, on) { document.getElementById(id)?.classList.toggle('active', on); }
 
+/* ── Settings panel ─────────────────────────────────────────────────────── */
+
+function openSettings() {
+    document.getElementById('settings-panel').classList.add('open');
+    document.getElementById('settings-backdrop').classList.add('open');
+}
+function closeSettings() {
+    document.getElementById('settings-panel').classList.remove('open');
+    document.getElementById('settings-backdrop').classList.remove('open');
+}
+
+async function loadSettings() {
+    try {
+        appSettings = await (await fetch('ConfigServlet')).json();
+        document.getElementById('s-mpd-host').value  = appSettings['mpd.host']       || 'localhost';
+        document.getElementById('s-mpd-port').value  = appSettings['mpd.port']       || '6600';
+        document.getElementById('s-music-dir').value = appSettings['music.dir']      || '~/Music';
+        document.getElementById('s-accent').value    = appSettings['ui.accentColor'] || '#7c3aed';
+        document.getElementById('s-stream-url').value = appSettings['stream.url']    || '';
+
+        const speed   = parseInt(appSettings['ui.vinylSpeed']  || '6');
+        const opacity = Math.round(parseFloat(appSettings['ui.bgOpacity'] || '0.18') * 100);
+        document.getElementById('s-vinyl-speed').value        = speed;
+        document.getElementById('s-vinyl-speed-val').textContent = speed + ' s/rev';
+        document.getElementById('s-bg-opacity').value         = opacity;
+        document.getElementById('s-bg-opacity-val').textContent  = opacity + ' %';
+
+        const togPause = document.getElementById('tog-pause-close');
+        if (togPause) togPause.classList.toggle('on', appSettings['player.pauseOnClose'] === 'true');
+
+        // Apply appearance immediately
+        applyAccent(appSettings['ui.accentColor'] || '#7c3aed');
+        applyVinylSpeed(speed);
+        applyBgOpacity(parseFloat(appSettings['ui.bgOpacity'] || '0.18'));
+
+        // Sync viz mode buttons
+        const savedMode = appSettings['visualizer.mode'] || 'ellipse';
+        document.querySelectorAll('.viz-mode-btn').forEach(b =>
+            b.classList.toggle('active', b.dataset.mode === savedMode));
+    } catch (e) { console.warn('Could not load settings:', e); }
+}
+
+function setVizMode(mode) {
+    Visualizer.setMode(mode);
+    saveSetting('visualizer.mode', mode);
+}
+
+async function saveStreamUrl(url) {
+    await saveSetting('stream.url', url);
+    // Reconnect visualizer with the new URL
+    if (url.trim()) Visualizer.connectStream(url.trim());
+}
+
+async function saveSetting(key, value) {
+    appSettings[key] = String(value);
+    await fetch('ConfigServlet', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ [key]: String(value) })
+    });
+}
+
+async function toggleSetting(key, btn) {
+    const newVal = appSettings[key] !== 'true';
+    btn.classList.toggle('on', newVal);
+    appSettings[key] = String(newVal);
+    await saveSetting(key, newVal);
+}
+
+async function saveConn() {
+    const host = document.getElementById('s-mpd-host').value.trim();
+    const port = document.getElementById('s-mpd-port').value.trim();
+    const dir  = document.getElementById('s-music-dir').value.trim();
+    await fetch('ConfigServlet', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ 'mpd.host': host, 'mpd.port': port, 'music.dir': dir })
+    });
+    Object.assign(appSettings, { 'mpd.host': host, 'mpd.port': port, 'music.dir': dir });
+    await testConn();
+}
+
+async function testConn() {
+    const statusEl = document.getElementById('conn-status');
+    const host = document.getElementById('s-mpd-host').value.trim();
+    const port = document.getElementById('s-mpd-port').value.trim();
+    statusEl.className = 'conn-status';
+    statusEl.textContent = 'Testing…';
+    try {
+        const r = await (await fetch(`ConfigServlet?action=test&host=${encodeURIComponent(host)}&port=${encodeURIComponent(port)}`)).json();
+        if (r.ok) {
+            statusEl.className = 'conn-status ok';
+            statusEl.textContent = `✓ Connected — MPD state: ${r.state}`;
+        } else {
+            statusEl.className = 'conn-status err';
+            statusEl.textContent = '✗ ' + (r.error || 'Connection failed');
+        }
+    } catch (e) {
+        statusEl.className = 'conn-status err';
+        statusEl.textContent = '✗ ' + e.message;
+    }
+}
+
+/* Live preview helpers */
+function previewAccent(hex) {
+    applyAccent(hex);
+    saveSetting('ui.accentColor', hex);
+}
+function previewVinylSpeed(val) {
+    document.getElementById('s-vinyl-speed-val').textContent = val + ' s/rev';
+    applyVinylSpeed(parseInt(val));
+    // save is handled by onchange
+}
+function previewBgOpacity(val) {
+    document.getElementById('s-bg-opacity-val').textContent = val + ' %';
+    applyBgOpacity(val / 100);
+    // save handled by onchange
+}
+
+function applyAccent(hex) {
+    const r = parseInt(hex.slice(1,3),16), g = parseInt(hex.slice(3,5),16), b = parseInt(hex.slice(5,7),16);
+    const root = document.documentElement;
+    root.style.setProperty('--accent',      hex);
+    root.style.setProperty('--accent-dim',  `rgb(${Math.max(0,r-30)},${Math.max(0,g-30)},${Math.max(0,b-30)})`);
+    root.style.setProperty('--accent-glow', `rgba(${r},${g},${b},.35)`);
+}
+function applyVinylSpeed(secs) {
+    document.documentElement.style.setProperty('--vinyl-speed', secs + 's');
+}
+function applyBgOpacity(opacity) {
+    document.documentElement.style.setProperty('--bg-opacity', opacity);
+}
+
 /* ── Init ───────────────────────────────────────────────────────────────── */
 
 async function init() {
+    await loadSettings();
     await poll();
     await fetchQueue();
-    setInterval(poll, POLL_MS);
+
+    // Start visualizer with saved mode and optional stream URL
+    Visualizer.init(
+        appSettings['stream.url']      || '',
+        appSettings['visualizer.mode'] || 'ellipse'
+    );
+
+    const ms = parseInt(appSettings['player.pollInterval'] || POLL_MS);
+    pollIntervalId = setInterval(poll, ms);
+
+    window.addEventListener('pagehide', () => {
+        if (appSettings['player.pauseOnClose'] === 'true' && status.state === 'play') {
+            navigator.sendBeacon('MPDServlet', new Blob(
+                [JSON.stringify({ action: 'pause' })],
+                { type: 'application/json' }
+            ));
+        }
+    });
 }
 
 document.addEventListener('DOMContentLoaded', init);
