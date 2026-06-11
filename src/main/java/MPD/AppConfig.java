@@ -25,11 +25,12 @@ public final class AppConfig {
         DEFAULTS.setProperty("music.dir",           expandHome("~/Music"));
         DEFAULTS.setProperty("ui.accentColor",      "#7c3aed");
         DEFAULTS.setProperty("ui.vinylSpeed",       "6");
-        DEFAULTS.setProperty("ui.bgOpacity",        "0.18");
+        DEFAULTS.setProperty("ui.bgOpacity",        "0.20");
         DEFAULTS.setProperty("player.pauseOnClose", "false");
         DEFAULTS.setProperty("player.pollInterval", "1000");
         DEFAULTS.setProperty("stream.url",          "");         // optional MPD httpd URL for real FFT
         DEFAULTS.setProperty("visualizer.mode",     "ellipse");  // ellipse | bar | off
+        DEFAULTS.setProperty("fifo.path",           "/tmp/mpd.fifo"); // MPD FIFO output path
     }
 
     private static volatile Properties cache = new Properties();
