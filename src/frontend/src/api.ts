@@ -3,31 +3,31 @@ import type { MPDSong, MPDItem, MPDStatus, AppSettings } from './types';
 // ── MPDServlet ────────────────────────────────────────────────────────────────
 
 async function mpdGet<T>(action: string, params: Record<string, string> = {}): Promise<T> {
-  const qs = new URLSearchParams({ action, ...params });
-  const r  = await fetch(`/MPDServlet?${qs}`);
-  if (!r.ok) throw new Error(`HTTP ${r.status}`);
-  return r.json() as Promise<T>;
+    const qs = new URLSearchParams({ action, ...params });
+    const r  = await fetch(`/MPDServlet?${qs}`);
+    if (!r.ok) throw new Error(`HTTP ${r.status}`);
+    return r.json() as Promise<T>;
 }
 
 async function mpdPost(action: string, params: Record<string, unknown> = {}): Promise<void> {
-  await fetch('/MPDServlet', {
-    method:  'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body:    JSON.stringify({ action, ...params }),
-  });
+    await fetch('/MPDServlet', {
+        method:  'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body:    JSON.stringify({ action, ...params }),
+    });
 }
 
 export const fetchNowPlaying = () =>
-  mpdGet<{ status: MPDStatus; song: MPDSong }>('nowplaying');
+    mpdGet<{ status: MPDStatus; song: MPDSong }>('nowplaying');
 
 export const fetchQueue = () =>
-  mpdGet<MPDSong[]>('queue');
+    mpdGet<MPDSong[]>('queue');
 
 export const fetchBrowse = (uri: string) =>
-  mpdGet<MPDItem[]>('browse', { uri });
+    mpdGet<MPDItem[]>('browse', { uri });
 
 export const fetchSearch = (q: string) =>
-  mpdGet<MPDSong[]>('search', { q });
+    mpdGet<MPDSong[]>('search', { q });
 
 // Transport
 export const cmd = mpdPost;
@@ -54,23 +54,44 @@ export const updateDb      = () => mpdPost('update');
 // ── ConfigServlet ─────────────────────────────────────────────────────────────
 
 export const fetchSettings = (): Promise<AppSettings> =>
-  fetch('/ConfigServlet').then(r => r.json());
+    fetch('/ConfigServlet').then(r => r.json());
 
 export const saveSettings = (updates: Partial<AppSettings>): Promise<void> =>
-  fetch('/ConfigServlet', {
-    method:  'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body:    JSON.stringify(updates),
-  }).then(() => undefined);
+    fetch('/ConfigServlet', {
+        method:  'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body:    JSON.stringify(updates),
+    }).then(() => undefined);
 
 export const testConnection = (host: string, port: string) =>
-  fetch(`/ConfigServlet?action=test&host=${encodeURIComponent(host)}&port=${encodeURIComponent(port)}`)
-    .then(r => r.json() as Promise<{ ok: boolean; state?: string; error?: string }>);
+    fetch(`/ConfigServlet?action=test&host=${encodeURIComponent(host)}&port=${encodeURIComponent(port)}`)
+        .then(r => r.json() as Promise<{ ok: boolean; state?: string; error?: string }>);
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
 export const artUrl = (file: string) =>
-  `/ArtServlet?uri=${encodeURIComponent(file)}`;
+    `/ArtServlet?uri=${encodeURIComponent(file)}`;
 
 export const basename = (path: string): string =>
-  path.split('/').pop()?.replace(/\.[^.]+$/, '') ?? '';
+    path.split('/').pop()?.replace(/\.[^.]+$/, '') ?? '';
+
+// ── SyncServlet ───────────────────────────────────────────────────────────────
+
+export interface SyncedPlaylist { name: string; tracks: number; }
+
+export const startSync = (url: string): Promise<{ jobId: string }> =>
+    fetch('/SyncServlet', {
+        method:  'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body:    JSON.stringify({ url }),
+    }).then(r => r.json());
+
+export const fetchSyncedPlaylists = (): Promise<SyncedPlaylist[]> =>
+    fetch('/SyncServlet?action=list').then(r => r.json());
+
+export const triggerMpdUpdate = (): Promise<void> =>
+    fetch('/SyncServlet', {
+        method:  'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body:    JSON.stringify({ action: 'updateMPD' }),
+    }).then(() => undefined);

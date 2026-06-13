@@ -1,23 +1,23 @@
-package MPD;
+package MPD.config;
+
+import org.springframework.stereotype.Service;
 
 import java.io.*;
 import java.nio.file.*;
 import java.util.*;
 
 /**
- * Singleton configuration store backed by
- * ~/.config/webplayer/config.properties.
- *
- * Automatically reloads when the file is modified on disk so changes
- * made via ConfigServlet take effect on the next request without a restart.
+ * Reads/writes ~/.config/webplayer/config.properties.
+ * Auto-reloads when the file changes on disk.
+ * Injected wherever settings are needed via @Autowired / constructor injection.
  */
-public final class AppConfig {
+@Service
+public class AppSettings {
 
     private static final Path FILE = Path.of(
-            System.getProperty("user.home"), ".config", "webplayer", "config.properties"
+        System.getProperty("user.home"), ".config", "webplayer", "config.properties"
     );
 
-    // ── Defaults ─────────────────────────────────────────────────────────────
     private static final Properties DEFAULTS = new Properties();
     static {
         DEFAULTS.setProperty("mpd.host",            "localhost");
@@ -28,25 +28,24 @@ public final class AppConfig {
         DEFAULTS.setProperty("ui.bgOpacity",        "0.20");
         DEFAULTS.setProperty("player.pauseOnClose", "false");
         DEFAULTS.setProperty("player.pollInterval", "1000");
-        DEFAULTS.setProperty("stream.url",          "");         // optional MPD httpd URL for real FFT
-        DEFAULTS.setProperty("visualizer.mode",     "ellipse");  // ellipse | bar | off
-        DEFAULTS.setProperty("fifo.path",           "/tmp/mpd.fifo"); // MPD FIFO output path
+        DEFAULTS.setProperty("stream.url",          "");
+        DEFAULTS.setProperty("visualizer.mode",     "ellipse");
+        DEFAULTS.setProperty("fifo.path",           "/tmp/mpd.fifo");
+        DEFAULTS.setProperty("yt.cookiesFile",      "");
     }
 
-    private static volatile Properties cache = new Properties();
-    private static volatile long       fileMtime = 0;
-
-    private AppConfig() {}
+    private volatile Properties cache = new Properties();
+    private volatile long fileMtime   = 0;
 
     // ── Public API ────────────────────────────────────────────────────────────
 
-    public static String get(String key) {
+    public String get(String key) {
         maybeReload();
         String v = cache.getProperty(key);
         return v != null ? v : DEFAULTS.getProperty(key, "");
     }
 
-    public static int getInt(String key) {
+    public int getInt(String key) {
         try { return Integer.parseInt(get(key).trim()); }
         catch (NumberFormatException e) {
             try { return Integer.parseInt(DEFAULTS.getProperty(key, "0").trim()); }
@@ -54,8 +53,8 @@ public final class AppConfig {
         }
     }
 
-    /** All keys merged: defaults overridden by file values. */
-    public static Map<String, String> getAll() {
+    /** All keys: defaults overridden by file values. */
+    public Map<String, String> getAll() {
         maybeReload();
         Map<String, String> out = new LinkedHashMap<>();
         for (String k : DEFAULTS.stringPropertyNames()) out.put(k, DEFAULTS.getProperty(k));
@@ -63,26 +62,25 @@ public final class AppConfig {
         return out;
     }
 
-    /** Validate, merge and persist a map of updates. Only known keys are accepted. */
-    public static synchronized void saveAll(Map<String, String> updates) throws IOException {
+    /** Merge updates (known keys only) and persist to disk. */
+    public synchronized void saveAll(Map<String, String> updates) throws IOException {
         maybeReload();
         Properties toWrite = new Properties();
-        toWrite.putAll(DEFAULTS);          // start from defaults
-        toWrite.putAll(cache);             // overlay current file values
-        for (var e : updates.entrySet()) { // apply updates (known keys only)
+        toWrite.putAll(DEFAULTS);
+        toWrite.putAll(cache);
+        for (var e : updates.entrySet())
             if (DEFAULTS.containsKey(e.getKey()))
                 toWrite.setProperty(e.getKey(), e.getValue().trim());
-        }
         Files.createDirectories(FILE.getParent());
         try (OutputStream os = Files.newOutputStream(FILE)) {
-            toWrite.store(os, "WebPlayer config — managed by ConfigServlet");
+            toWrite.store(os, "WebPlayer config");
         }
         reload();
     }
 
     // ── Internals ─────────────────────────────────────────────────────────────
 
-    private static void maybeReload() {
+    private void maybeReload() {
         try {
             if (Files.exists(FILE)) {
                 long mtime = Files.getLastModifiedTime(FILE).toMillis();
@@ -91,7 +89,7 @@ public final class AppConfig {
         } catch (IOException ignored) {}
     }
 
-    private static synchronized void reload() {
+    private synchronized void reload() {
         Properties p = new Properties();
         try {
             if (Files.exists(FILE)) {
@@ -102,8 +100,8 @@ public final class AppConfig {
         cache = p;
     }
 
-    static String expandHome(String path) {
-        if (path.startsWith("~/") || path.equals("~"))
+    public static String expandHome(String path) {
+        if (path != null && (path.startsWith("~/") || path.equals("~")))
             return System.getProperty("user.home") + path.substring(1);
         return path;
     }

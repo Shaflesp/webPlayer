@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import type { MPDStatus, MPDSong, AppSettings, SidebarTab } from './types.ts';
+import type { MPDStatus, MPDSong, AppSettings, SidebarTab } from './types';
 
 // ── Defaults ─────────────────────────────────────────────────────────────────
 
@@ -32,6 +32,7 @@ interface PlayerState {
   settings:     AppSettings;
   sidebarTab:   SidebarTab;
   settingsOpen: boolean;
+  syncOpen:     boolean;
   errorMsg:     string | null;
 
   setStatus:       (s: MPDStatus)            => void;
@@ -41,6 +42,7 @@ interface PlayerState {
   patchSettings:   (patch: Partial<AppSettings>) => void;
   setSidebarTab:   (t: SidebarTab)           => void;
   setSettingsOpen: (open: boolean)           => void;
+  setSyncOpen:     (open: boolean)           => void;
   setError:        (msg: string | null)      => void;
 }
 
@@ -53,14 +55,18 @@ export const useStore = create<PlayerState>((set) => ({
   settings:     DEFAULT_SETTINGS,
   sidebarTab:   'queue',
   settingsOpen: false,
+  syncOpen:     false,
   errorMsg:     null,
 
   setStatus:       (status)       => set({ status }),
   setCurrentSong:  (currentSong)  => set({ currentSong }),
   setQueue:        (queue)        => set({ queue }),
   setSettings:     (settings)     => set({ settings }),
-  patchSettings:   (patch) => set(s => ({settings: { ...DEFAULT_SETTINGS, ...s.settings, ...patch } as AppSettings,})),
+  patchSettings:   (patch)        => set(s => ({
+    settings: { ...DEFAULT_SETTINGS, ...s.settings, ...patch } as AppSettings,
+  })),
   setSidebarTab:   (sidebarTab)   => set({ sidebarTab }),
   setSettingsOpen: (settingsOpen) => set({ settingsOpen }),
+  setSyncOpen:     (syncOpen)     => set({ syncOpen }),
   setError:        (errorMsg)     => set({ errorMsg }),
 }));

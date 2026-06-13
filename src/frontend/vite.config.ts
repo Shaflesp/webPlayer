@@ -1,16 +1,14 @@
 import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
 
-// Tomcat dev server port — change if yours differs
-const TOMCAT = 'http://localhost:8080/webPlayer';
+const TOMCAT = 'http://localhost:8080';
 
 export default defineConfig({
   plugins: [react()],
 
   build: {
-    // Output goes straight into the WAR's webapp directory
-    outDir:     '../main/webapp',
-    emptyOutDir: false,   // never wipe WEB-INF / META-INF
+    outDir:     'dist',
+    emptyOutDir: true,
     assetsDir:  'assets',
     sourcemap:  false,
   },

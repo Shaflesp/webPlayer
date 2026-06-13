@@ -5,6 +5,7 @@ import { Sidebar }    from './components/Sidebar';
 import { NowPlaying } from './components/NowPlaying';
 import { PlayerBar }  from './components/PlayerBar';
 import { Settings }   from './components/Settings';
+import { SyncPanel }  from './components/SyncPanel';
 import {
   play, pause, resume, next, previous, setVol,
 } from './api';
@@ -36,7 +37,7 @@ export function App() {
 
   useEffect(() => {
     document.documentElement.style.setProperty(
-      '--vinyl-speed', `${settings['ui.vinylSpeed'] ?? '6'}s`,
+        '--vinyl-speed', `${settings['ui.vinylSpeed'] ?? '6'}s`,
     );
   }, [settings['ui.vinylSpeed']]);
 
@@ -65,25 +66,26 @@ export function App() {
   }, [status.state, status.volume]);
 
   return (
-    <div className="app">
-      <Sidebar />
+      <div className="app">
+        <Sidebar />
 
-      <div className="main-col">
-        {errorMsg && (
-          <div className="error-banner">
-            <i className="fas fa-triangle-exclamation" />
-            <span>{errorMsg}</span>
-            <button onClick={() => setError(null)}>
-              <i className="fas fa-xmark" />
-            </button>
-          </div>
-        )}
+        <div className="main-col">
+          {errorMsg && (
+              <div className="error-banner">
+                <i className="fas fa-triangle-exclamation" />
+                <span>{errorMsg}</span>
+                <button onClick={() => setError(null)}>
+                  <i className="fas fa-xmark" />
+                </button>
+              </div>
+          )}
 
-        <NowPlaying />
-        <PlayerBar />
+          <NowPlaying />
+          <PlayerBar />
+        </div>
+
+        <Settings />
+        <SyncPanel />
       </div>
-
-      <Settings />
-    </div>
   );
 }
