@@ -264,7 +264,7 @@ export function Sidebar() {
       <aside className="sidebar">
         <div className="sidebar-header">
           <div className="brand">
-            <img src="/images/logo.png" alt="" className="brand-logo"
+            <img src="/images/icon.png" alt="" className="brand-logo"
                  onError={e => (e.currentTarget.style.display = 'none')} />
             <span>WebPlayer</span>
             <Tooltip text="Import from YouTube">
