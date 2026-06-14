@@ -3,14 +3,13 @@ package MPD.controller;
 import MPD.service.MpdService;
 import MPD.service.SyncService;
 import MPD.service.SyncService.SyncJob;
-import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
 import java.io.IOException;
-import java.util.List;
 import java.util.Map;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 @RestController
 @RequestMapping("/SyncServlet")
@@ -32,38 +31,8 @@ public class SyncController {
         return switch (action) {
             case "stream" -> stream(jobId);
             case "list"   -> syncService.listSyncedPlaylists();
-            default       -> ResponseEntity.badRequest().body("Unknown action");
+            default       -> ResponseEntity.badRequest().body(Map.of("error", "Unknown action: " + action));
         };
-    }
-
-    /** SSE stream of yt-dlp output lines for a given jobId. */
-    @GetMapping(value = "", params = "action=stream", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
-    public SseEmitter stream(@RequestParam String jobId) {
-        SyncJob job     = syncService.getJob(jobId);
-        SseEmitter emitter = new SseEmitter(-1L);
-
-        if (job == null) { emitter.complete(); return emitter; }
-
-        syncService.subscribe(
-            job,
-            line -> {
-                try {
-                    emitter.send(SseEmitter.event().data(line));
-                } catch (IOException e) {
-                    emitter.complete();
-                }
-            },
-            () -> {
-                try {
-                    if (job.playlist != null)
-                        emitter.send(SseEmitter.event().name("playlist").data(job.playlist));
-                    emitter.send(SseEmitter.event().name("done").data(job.ok ? "ok" : "error"));
-                    emitter.complete();
-                } catch (IOException ignored) { emitter.complete(); }
-            }
-        );
-
-        return emitter;
     }
 
     // ── POST ──────────────────────────────────────────────────────────────────
@@ -87,13 +56,45 @@ public class SyncController {
                     yield ResponseEntity.ok(Map.of("ok", false, "error", e.getMessage()));
                 }
             }
-            default -> ResponseEntity.badRequest().body(Map.of("error", "unknown action"));
+            default -> ResponseEntity.badRequest().body(Map.of("error", "Unknown action: " + action));
         };
     }
 
-    /** Convenience typed list endpoint */
-    @GetMapping(value = "", params = "action=list")
-    public List<Map<String, Object>> list() {
-        return syncService.listSyncedPlaylists();
+    // ── SSE stream ────────────────────────────────────────────────────────────
+
+    private SseEmitter stream(String jobId) {
+        SseEmitter emitter = new SseEmitter(-1L);
+
+        if (jobId == null) { emitter.complete(); return emitter; }
+        SyncJob job = syncService.getJob(jobId);
+        if (job == null)  { emitter.complete(); return emitter; }
+
+        AtomicBoolean active = new AtomicBoolean(true);
+        emitter.onCompletion(() -> active.set(false));
+        emitter.onTimeout(()    -> active.set(false));
+        emitter.onError(t       -> active.set(false));
+
+        syncService.subscribe(
+            job,
+            line -> {
+                if (!active.get()) return;
+                try {
+                    emitter.send(SseEmitter.event().data(line));
+                } catch (IOException | IllegalStateException e) {
+                    active.set(false);
+                }
+            },
+            () -> {
+                if (!active.get()) return;
+                try {
+                    if (job.playlist != null)
+                        emitter.send(SseEmitter.event().name("playlist").data(job.playlist));
+                    emitter.send(SseEmitter.event().name("done").data(job.ok ? "ok" : "error"));
+                    emitter.complete();
+                } catch (IOException | IllegalStateException ignored) {}
+            }
+        );
+
+        return emitter;
     }
 }

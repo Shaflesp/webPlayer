@@ -6,6 +6,7 @@ import org.springframework.web.bind.annotation.*;
 
 import java.io.*;
 import java.net.Socket;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.*;
 
 @RestController
@@ -13,7 +14,7 @@ import java.nio.file.*;
 public class ArtController {
 
     private static final String[] COVER_NAMES =
-        { "cover.jpg", "cover.png", "folder.jpg", "folder.png", "artwork.jpg", "front.jpg" };
+            { "cover.jpg", "cover.png", "folder.jpg", "folder.png", "artwork.jpg", "front.jpg" };
 
     private final AppSettings settings;
 
@@ -24,79 +25,98 @@ public class ArtController {
         Path base = Path.of(AppSettings.expandHome(settings.get("music.dir"))).normalize();
         Path song = base.resolve(uri).normalize();
 
-        // Path traversal guard
         if (!song.startsWith(base))
             return ResponseEntity.badRequest().build();
 
-        // 1. Filesystem cover file in the song's directory
+        // 1. Look for a cover file alongside the song
         Path dir = song.getParent();
         if (dir != null) {
             for (String name : COVER_NAMES) {
                 Path cover = dir.resolve(name);
                 if (Files.exists(cover)) {
                     try {
-                        byte[] data = Files.readAllBytes(cover);
-                        return ok(data, sniffMime(name));
+                        return ok(Files.readAllBytes(cover), sniffMime(name));
                     } catch (IOException ignored) {}
                 }
             }
         }
 
-        // 2. MPD binary protocol (readpicture then albumart)
+        // 2. MPD binary protocol — readpicture (embedded), then albumart
         byte[] data = fetchMpdArt(uri, "readpicture");
         if (data == null || data.length == 0) data = fetchMpdArt(uri, "albumart");
-        if (data != null && data.length > 0) return ok(data, "image/jpeg");
+        if (data != null && data.length > 0)  return ok(data, "image/jpeg");
 
         return ResponseEntity.notFound().build();
     }
 
+    // ── MPD binary art protocol ───────────────────────────────────────────────
+
+    /**
+     * Reads album art from MPD via the readpicture / albumart binary commands.
+     * The response may span multiple chunks when the image exceeds MPD's buffer
+     * size (~64 KB by default).  The protocol per chunk is:
+     *
+     *   size: TOTAL\n
+     *   type: MIME\n
+     *   binary: N\n
+     *   <N raw bytes>
+     *   \nOK\n
+     *
+     * Subsequent requests use an increasing byte offset.
+     */
     private byte[] fetchMpdArt(String songUri, String command) {
-        try (Socket socket = new Socket(settings.get("mpd.host"), settings.getInt("mpd.port"));
-             InputStream  in  = socket.getInputStream();
-             OutputStream out = socket.getOutputStream()) {
+        try (Socket   socket = new Socket(settings.get("mpd.host"), settings.getInt("mpd.port"));
+             InputStream  in = socket.getInputStream();
+             OutputStream out= socket.getOutputStream()) {
 
-            // Consume MPD greeting
-            readLine(in);
+            readLine(in); // consume MPD greeting "OK MPD x.y.z"
 
-            String cmd = command + " \"" + songUri + "\" 0\n";
-            out.write(cmd.getBytes());
-            out.flush();
+            final String esc = songUri.replace("\\", "\\\\").replace("\"", "\\\"");
 
-            // Parse response header
-            String firstLine = readLine(in);
-            if (firstLine == null || firstLine.startsWith("ACK")) return null;
+            // ── First chunk (offset = 0) ──────────────────────────────────────
+            send(out, command + " \"" + esc + "\" 0");
 
-            int size = 0;
-            String binaryLine = null;
-            String line = firstLine;
-            while (line != null && !line.equals("OK")) {
-                if (line.startsWith("size: "))   size = Integer.parseInt(line.substring(6).trim());
-                if (line.startsWith("binary: ")) binaryLine = line;
-                if (binaryLine != null) break;
-                line = readLine(in);
+            int totalSize = 0, chunkSize = 0;
+            String line;
+            while ((line = readLine(in)) != null) {
+                if (line.startsWith("ACK") || line.equals("OK")) return null;
+                if (line.startsWith("size: "))   totalSize = Integer.parseInt(line.substring(6).trim());
+                if (line.startsWith("binary: ")) { chunkSize = Integer.parseInt(line.substring(8).trim()); break; }
             }
-            if (binaryLine == null || size == 0) return null;
+            if (chunkSize == 0 || totalSize == 0) return null;
 
-            int chunkSize = Integer.parseInt(binaryLine.substring(8).trim());
-            byte[] chunk = in.readNBytes(chunkSize);
-
-            // Reassemble full image using chunked reads
-            ByteArrayOutputStream buf = new ByteArrayOutputStream(size);
-            buf.write(chunk);
+            ByteArrayOutputStream buf = new ByteArrayOutputStream(totalSize);
+            buf.write(in.readNBytes(chunkSize));
             int offset = chunkSize;
-            while (offset < size) {
+
+            // ── Remaining chunks ──────────────────────────────────────────────
+            while (offset < totalSize) {
+                // After each chunk: "\n" then "OK\n" — consume both before sending next request
+                readLine(in); // empty line (the \n separator after binary data)
                 readLine(in); // "OK"
-                String nextCmd = command + " \"" + songUri + "\" " + offset + "\n";
-                out.write(nextCmd.getBytes()); out.flush();
-                readLine(in); // skip "binary: N"
-                int remaining = Math.min(size - offset, 65536);
-                byte[] part = in.readNBytes(remaining);
-                buf.write(part);
-                offset += part.length;
+
+                send(out, command + " \"" + esc + "\" " + offset);
+
+                // Parse headers of the next chunk response
+                chunkSize = 0;
+                while ((line = readLine(in)) != null) {
+                    if (line.startsWith("ACK") || line.equals("OK")) break;
+                    if (line.startsWith("binary: ")) { chunkSize = Integer.parseInt(line.substring(8).trim()); break; }
+                }
+                if (chunkSize == 0) break;
+
+                buf.write(in.readNBytes(chunkSize));
+                offset += chunkSize;
             }
-            return buf.toByteArray();
+
+            return buf.size() > 0 ? buf.toByteArray() : null;
 
         } catch (Exception ignored) { return null; }
+    }
+
+    private static void send(OutputStream out, String cmd) throws IOException {
+        out.write((cmd + "\n").getBytes(StandardCharsets.UTF_8));
+        out.flush();
     }
 
     private static String readLine(InputStream in) throws IOException {
@@ -111,9 +131,9 @@ public class ArtController {
 
     private static ResponseEntity<byte[]> ok(byte[] data, String mime) {
         return ResponseEntity.ok()
-            .contentType(MediaType.parseMediaType(mime))
-            .cacheControl(CacheControl.maxAge(java.time.Duration.ofHours(1)))
-            .body(data);
+                .contentType(MediaType.parseMediaType(mime))
+                .cacheControl(CacheControl.maxAge(java.time.Duration.ofHours(1)))
+                .body(data);
     }
 
     private static String sniffMime(String name) {

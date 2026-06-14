@@ -17,9 +17,15 @@ import java.util.List;
 @Configuration
 public class WebConfig implements WebMvcConfigurer {
 
-    /** Put Gson first so JsonElement / JsonObject / JsonArray are serialized correctly. */
+    /**
+     * Add Gson at position 0 so JsonElement / JsonObject / JsonArray are serialised
+     * correctly, while keeping all Spring-default converters (ByteArray, String,
+     * Resource, …) that other controllers depend on.
+     * Note: extendMessageConverters runs AFTER the defaults are populated, so
+     * inserting at index 0 just makes Gson win for content negotiation.
+     */
     @Override
-    public void configureMessageConverters(List<HttpMessageConverter<?>> converters) {
+    public void extendMessageConverters(List<HttpMessageConverter<?>> converters) {
         Gson gson = new GsonBuilder().serializeNulls().create();
         GsonHttpMessageConverter gsonConverter = new GsonHttpMessageConverter();
         gsonConverter.setGson(gson);
@@ -29,16 +35,16 @@ public class WebConfig implements WebMvcConfigurer {
     @Override
     public void addResourceHandlers(ResourceHandlerRegistry registry) {
         registry
-                .addResourceHandler("/**")
-                .addResourceLocations("classpath:/static/")
-                .resourceChain(true)
-                .addResolver(new SpaFallbackResolver());
+            .addResourceHandler("/**")
+            .addResourceLocations("classpath:/static/")
+            .resourceChain(true)
+            .addResolver(new SpaFallbackResolver());
     }
 
     static class SpaFallbackResolver implements ResourceResolver {
 
         private static final ClassPathResource INDEX =
-                new ClassPathResource("static/index.html");
+            new ClassPathResource("static/index.html");
 
         @Override
         public Resource resolveResource(HttpServletRequest req, String path,
