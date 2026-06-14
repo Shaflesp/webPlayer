@@ -50,7 +50,6 @@
                 <directory>src/main/resources</directory>
             </resource>
             <resource>
-                <!-- Vite outputs to src/frontend/dist; we copy it in as static files -->
                 <directory>src/frontend/dist</directory>
                 <targetPath>static</targetPath>
             </resource>
