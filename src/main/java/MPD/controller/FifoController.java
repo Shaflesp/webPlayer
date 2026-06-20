@@ -6,6 +6,7 @@ import org.springframework.web.bind.annotation.*;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
 import java.io.IOException;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 @RestController
 @RequestMapping("/FifoServlet")
@@ -15,18 +16,11 @@ public class FifoController {
 
     public FifoController(FifoService fifoService) { this.fifoService = fifoService; }
 
-    /**
-     * GET /FifoServlet  →  text/event-stream
-     * Each event: "data:0,12,255,…"  at ~35 fps
-     *
-     * Each SSE client gets its own SseEmitter; the FifoService daemon thread
-     * does all the I/O and FFT.  This method just fans out the latest bins.
-     */
     @GetMapping(produces = MediaType.TEXT_EVENT_STREAM_VALUE)
     public SseEmitter stream() {
         SseEmitter emitter = new SseEmitter(-1L);
 
-        var active = new java.util.concurrent.atomic.AtomicBoolean(true);
+        AtomicBoolean active = new AtomicBoolean(true);
         emitter.onCompletion(() -> active.set(false));
         emitter.onTimeout(()    -> active.set(false));
         emitter.onError(t       -> active.set(false));
@@ -44,15 +38,26 @@ public class FifoController {
 
                     if (!active.get()) break;
                     try {
-                        emitter.send(SseEmitter.event().data(sb.toString()));
-                    } catch (IOException e) {
-                        // Broken pipe — client is gone. Don't call emitter.complete()
-                        // (the connection is already dead; doing so just triggers another error).
+                        // IMPORTANT: explicit MediaType.TEXT_PLAIN.
+                        // Without this, Spring's converter resolution can pick the
+                        // globally-registered GsonHttpMessageConverter (added for
+                        // /MPDServlet's JSON responses) instead of a plain string
+                        // converter — and Gson serializes a String as a JSON string
+                        // literal, wrapping it in quotes. The browser then receives
+                        // "12,45,200,..." (quotes included as literal text), which
+                        // breaks parseInt on the first/last value of every frame.
+                        emitter.send(SseEmitter.event().data(sb.toString(), MediaType.TEXT_PLAIN));
+                    } catch (IOException | IllegalStateException e) {
+                        // Client disconnected. completeWithError() (not a bare break,
+                        // and not complete()) is what actually matters here: it tells
+                        // Spring's async machinery the stream died due to an error so
+                        // it tears down the AsyncContext immediately. Leaving it
+                        // dangling is what causes Tomcat to rediscover the dead socket
+                        // later on ITS OWN thread (tomcat-handler-N, not this one) and
+                        // retry a flush there — outside this try/catch entirely, which
+                        // is exactly the unhandled "Relais brisé (pipe)" seen in logs.
                         active.set(false);
-                        break;
-                    } catch (IllegalStateException e) {
-                        // Emitter already completed/errored (race with onError callback)
-                        active.set(false);
+                        try { emitter.completeWithError(e); } catch (Exception ignored) {}
                         break;
                     }
                     Thread.sleep(28); // ~35 fps

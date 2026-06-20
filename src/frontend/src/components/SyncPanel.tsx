@@ -70,6 +70,13 @@ export function SyncPanel() {
     setProgress(null);
     setDoneState(null);
 
+    // Tracks whether the server already sent a definitive 'done' signal.
+    // SSE connections fire 'onerror' when the underlying connection closes —
+    // including the EXPECTED close right after a successful 'done' event.
+    // Without this guard, that benign close re-fires onerror a moment later
+    // and overwrites a correct 'ok' state with 'error'.
+    let doneReceived = false;
+
     try {
       const { jobId } = await apiStartSync(syncUrl.trim());
       const es = new EventSource(`/SyncServlet?action=stream&jobId=${jobId}`);
@@ -78,6 +85,7 @@ export function SyncPanel() {
       es.onmessage = e => setLines(prev => [...prev, e.data as string]);
 
       es.addEventListener('done', e => {
+        doneReceived = true;
         const ok = (e as MessageEvent<string>).data === 'ok';
         setDoneState(ok ? 'ok' : 'error');
         setSyncing(false);
@@ -87,6 +95,8 @@ export function SyncPanel() {
       });
 
       es.onerror = () => {
+        // Ignore — this is just the connection closing after a successful 'done'.
+        if (doneReceived) return;
         setSyncing(false);
         setDoneState('error');
         es.close();

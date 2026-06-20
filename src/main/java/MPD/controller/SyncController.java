@@ -3,11 +3,13 @@ package MPD.controller;
 import MPD.service.MpdService;
 import MPD.service.SyncService;
 import MPD.service.SyncService.SyncJob;
+import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
 import java.io.IOException;
+import java.util.List;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicBoolean;
 
@@ -23,8 +25,6 @@ public class SyncController {
         this.mpdService  = mpdService;
     }
 
-    // ── GET ───────────────────────────────────────────────────────────────────
-
     @GetMapping
     public Object get(@RequestParam String action,
                       @RequestParam(required = false) String jobId) {
@@ -34,8 +34,6 @@ public class SyncController {
             default       -> ResponseEntity.badRequest().body(Map.of("error", "Unknown action: " + action));
         };
     }
-
-    // ── POST ──────────────────────────────────────────────────────────────────
 
     @PostMapping
     public ResponseEntity<Map<String, Object>> post(@RequestBody Map<String, Object> body) {
@@ -60,8 +58,6 @@ public class SyncController {
         };
     }
 
-    // ── SSE stream ────────────────────────────────────────────────────────────
-
     private SseEmitter stream(String jobId) {
         SseEmitter emitter = new SseEmitter(-1L);
 
@@ -74,25 +70,37 @@ public class SyncController {
         emitter.onTimeout(()    -> active.set(false));
         emitter.onError(t       -> active.set(false));
 
+        // NOTE: every .data(...) call below explicitly passes MediaType.TEXT_PLAIN.
+        // Without it, the globally-registered GsonHttpMessageConverter (added for
+        // /MPDServlet's JSON responses) can intercept these plain-string sends and
+        // JSON-encode them — wrapping each log line in literal quote characters.
+        // Same root cause as the FifoController fix; affects any SSE controller
+        // that sends plain strings.
         syncService.subscribe(
-            job,
-            line -> {
-                if (!active.get()) return;
-                try {
-                    emitter.send(SseEmitter.event().data(line));
-                } catch (IOException | IllegalStateException e) {
-                    active.set(false);
+                job,
+                line -> {
+                    if (!active.get()) return;
+                    try {
+                        emitter.send(SseEmitter.event().data(line, MediaType.TEXT_PLAIN));
+                    } catch (IOException | IllegalStateException e) {
+                        // Same fix as FifoController: completeWithError, not a bare
+                        // flag-flip, so Spring tears down the AsyncContext immediately
+                        // rather than leaving it for Tomcat to rediscover later.
+                        active.set(false);
+                        try { emitter.completeWithError(e); } catch (Exception ignored) {}
+                    }
+                },
+                () -> {
+                    if (!active.get()) return;
+                    try {
+                        if (job.playlist != null)
+                            emitter.send(SseEmitter.event().name("playlist").data(job.playlist, MediaType.TEXT_PLAIN));
+                        emitter.send(SseEmitter.event().name("done").data(job.ok ? "ok" : "error", MediaType.TEXT_PLAIN));
+                        emitter.complete();
+                    } catch (IOException | IllegalStateException e) {
+                        try { emitter.completeWithError(e); } catch (Exception ignored) {}
+                    }
                 }
-            },
-            () -> {
-                if (!active.get()) return;
-                try {
-                    if (job.playlist != null)
-                        emitter.send(SseEmitter.event().name("playlist").data(job.playlist));
-                    emitter.send(SseEmitter.event().name("done").data(job.ok ? "ok" : "error"));
-                    emitter.complete();
-                } catch (IOException | IllegalStateException ignored) {}
-            }
         );
 
         return emitter;

@@ -213,7 +213,7 @@ public class SyncService {
             job.lines.add("Starting download…");
 
             List<String> dlArgs = new ArrayList<>(List.of(
-                    ytdlp, "-i",
+                    ytdlp, //"-i",
                     "-f",  "bestaudio[acodec=opus]/bestaudio",
                     "-x",  "--audio-format", "best",
                     "--embed-thumbnail", "--add-metadata",

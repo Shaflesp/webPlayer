@@ -8,6 +8,7 @@ import { Settings }   from './components/Settings';
 import { SyncPanel }  from './components/SyncPanel';
 import {
   play, pause, resume, next, previous, setVol,
+  fetchSettings,
 } from './api';
 
 function hexToRgb(hex: string): [number, number, number] {
@@ -17,10 +18,23 @@ function hexToRgb(hex: string): [number, number, number] {
 }
 
 export function App() {
-  const status   = useStore(s => s.status);
-  const settings = useStore(s => s.settings);
-  const errorMsg = useStore(s => s.errorMsg);
-  const setError = useStore(s => s.setError);
+  const status      = useStore(s => s.status);
+  const settings    = useStore(s => s.settings);
+  const setSettings = useStore(s => s.setSettings);
+  const errorMsg    = useStore(s => s.errorMsg);
+  const setError    = useStore(s => s.setError);
+
+  // ── Hydrate persisted settings from the server on startup ─────────────────
+  // The store starts with hardcoded JS defaults (see DEFAULT_SETTINGS in
+  // store.ts). Without this fetch, every saved preference — accent colour,
+  // background opacity, visualizer mode, etc. — only takes effect once the
+  // user manually opens the Settings panel, making it LOOK like settings
+  // reset on every relaunch even though they're correctly persisted server-side.
+  useEffect(() => {
+    fetchSettings()
+        .then(setSettings)
+        .catch(() => { /* server not reachable yet — keep defaults, poller will retry */ });
+  }, []);
 
   // Start polling (queue smart-updates are baked in)
   usePoller();
@@ -40,6 +54,12 @@ export function App() {
         '--vinyl-speed', `${settings['ui.vinylSpeed'] ?? '6'}s`,
     );
   }, [settings['ui.vinylSpeed']]);
+
+  useEffect(() => {
+    document.documentElement.style.setProperty(
+        '--bg-opacity', settings['ui.bgOpacity'] ?? '0.20',
+    );
+  }, [settings['ui.bgOpacity']]);
 
   // ── Keyboard shortcuts ────────────────────────────────────────────────────
   useEffect(() => {

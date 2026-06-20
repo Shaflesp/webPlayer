@@ -57,9 +57,7 @@
                                     mkdir -p src/main/resources/native &amp;&amp;
                                     if [ ! -f src/main/resources/native/yt-dlp ]; then
                                     echo "[webplayer] Downloading yt-dlp binary..." &amp;&amp;
-                                    curl -L --progress-bar
-                                    -o src/main/resources/native/yt-dlp
-                                    https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp &amp;&amp;
+                                    curl -L --progress-bar -o src/main/resources/native/yt-dlp https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp &amp;&amp;
                                     chmod +x src/main/resources/native/yt-dlp &amp;&amp;
                                     echo "[webplayer] yt-dlp downloaded.";
                                     else

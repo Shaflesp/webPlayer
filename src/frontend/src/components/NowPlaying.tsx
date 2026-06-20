@@ -96,9 +96,6 @@ export function NowPlaying() {
 
     return (
         <section className="now-playing">
-            {/* Visualizer canvas — z-index -1, behind all normal-flow children */}
-            <canvas ref={canvasRef} className="viz-canvas" />
-
             {/* Blurred background art */}
             {file && (
                 <div
@@ -107,6 +104,10 @@ export function NowPlaying() {
                 />
             )}
             <div className="bg-overlay" />
+
+            {
+      }
+            <canvas ref={canvasRef} className="viz-canvas" />
 
             <VinylDisc
                 ref={vinylRef}

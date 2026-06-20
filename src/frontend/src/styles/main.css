@@ -207,7 +207,13 @@ input  { font: inherit; }
   min-height: 0; position: relative; z-index: 0;
   overflow: hidden;
 }
-.viz-canvas { position: absolute; inset: 0; z-index: -1; pointer-events: none; }
+.viz-canvas {
+  position: absolute;
+  inset: 0;
+  z-index: 0;  
+  pointer-events: none;
+}
+
 .bg-art {
   position: absolute; inset: 0;
   background-size: cover; background-position: center;
@@ -262,11 +268,29 @@ input  { font: inherit; }
   width: 12px; height: 12px; border-radius: 50%;
   background: #0a0a0a; box-shadow: 0 0 0 1.5px #3a3a3a; z-index: 2;
 }
+/* ── Tonearm pivot ────────────────────────────────────────────────────────── */
 .tonearm {
-  position: absolute; top: -8%; right: -4%;
-  width: 28%; height: 68%; pointer-events: none; z-index: 2;
+  position: absolute;
+  top: -8%; right: -4%;
+  width: 28%; height: 68%;
+  pointer-events: none;
+  z-index: 2;
+
+  /* Pivot at the top-right corner where the physical axle sits in the SVG */
+  transform-origin: 80% 7.5%;
+  transform: rotate(18deg);          /* lifted — away from the disc */
+  transition: transform .6s cubic-bezier(.4, 0, .2, 1);
 }
-.tonearm svg { width: 100%; height: 100%; overflow: visible; }
+
+.tonearm.playing {
+  transform: rotate(0deg);           /* on the groove */
+}
+
+.tonearm svg {
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+}
 .np-meta { text-align: center; max-width: 420px; width: 100%; z-index: 1; }
 .np-title  { font-size: 22px; font-weight: 700; letter-spacing: -.3px; line-height: 1.2; margin-bottom: 6px; }
 .np-artist { font-size: 15px; color: var(--text-sub); margin-bottom: 3px; }
