@@ -55,13 +55,13 @@ public class ArtController {
      * Reads album art from MPD via the readpicture / albumart binary commands.
      * The response may span multiple chunks when the image exceeds MPD's buffer
      * size (~64 KB by default).  The protocol per chunk is:
-     *
+     * <p>
      *   size: TOTAL\n
      *   type: MIME\n
      *   binary: N\n
      *   <N raw bytes>
      *   \nOK\n
-     *
+     * <p>
      * Subsequent requests use an increasing byte offset.
      */
     private byte[] fetchMpdArt(String songUri, String command) {

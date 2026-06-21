@@ -2,12 +2,13 @@ package MPD;
 
 import java.io.*;
 import java.net.*;
+import java.nio.charset.StandardCharsets;
 import java.util.*;
 
 /**
  * Thin MPD protocol client over a plain TCP socket.
  * Each instance represents one connection; close it when done.
- *
+ * <p>
  * MPD protocol basics:
  *   - Connect → server sends  "OK MPD <version>"
  *   - Send a command line     → server sends data lines ending with "OK"
@@ -32,8 +33,8 @@ public class MPDClient implements Closeable {
     public MPDClient(String host, int port) throws IOException {
         socket = new Socket(host, port);
         socket.setSoTimeout(TIMEOUT_MS);
-        reader = new BufferedReader(new InputStreamReader(socket.getInputStream(),  "UTF-8"));
-        writer = new PrintWriter(new OutputStreamWriter(socket.getOutputStream(), "UTF-8"), true);
+        reader = new BufferedReader(new InputStreamReader(socket.getInputStream(), StandardCharsets.UTF_8));
+        writer = new PrintWriter(new OutputStreamWriter(socket.getOutputStream(), StandardCharsets.UTF_8), true);
 
         String greeting = reader.readLine();
         if (greeting == null || !greeting.startsWith("OK MPD")) {

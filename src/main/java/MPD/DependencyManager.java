@@ -12,12 +12,12 @@ import java.util.*;
 
 /**
  * Manages runtime dependencies that can't live inside the JAR:
- *
+ * <p> 
  *   - yt-dlp  : bundled in /native/yt-dlp at build time, extracted to
  *               ~/.local/share/webplayer/bin/yt-dlp on first run.
  *   - MPD     : must be installed system-wide (audio hardware access required).
  *   - ffmpeg  : must be installed system-wide (used by yt-dlp for conversion).
- *
+ * <p>   
  * SyncService injects this bean and calls getYtDlpPath() instead of
  * hard-coding "yt-dlp", so the bundled binary is used when available.
  */

@@ -12,7 +12,7 @@ import java.util.concurrent.atomic.AtomicReference;
  * Reads MPD's FIFO PCM output, runs a Cooley-Tukey FFT on every 2048-frame
  * chunk, and exposes the latest 64 log-frequency bins so FifoController
  * can stream them to SSE clients.
- *
+ * <p>
  * The reader runs on a single virtual thread started at application startup
  * (@PostConstruct).  Multiple SSE clients all read the same latest frame —
  * no per-client I/O.

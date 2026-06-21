@@ -18,8 +18,10 @@ public class ConfigController {
         this.mpdService = mpdService;
     }
 
-    /** GET /ConfigServlet              → all settings as { key: value } */
-    /** GET /ConfigServlet?action=test  → { ok: boolean, state?, error? } */
+    /** 
+     * GET /ConfigServlet              → all settings as { key: value }
+     * GET /ConfigServlet?action=test  → { ok: boolean, state?, error? }
+     */
     @GetMapping
     public Object get(
             @RequestParam(required = false) String action,

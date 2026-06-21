@@ -64,7 +64,7 @@ public class SyncService {
             try {
                 while (true) {
                     while (idx < job.lines.size()) onLine.accept(job.lines.get(idx++));
-                    if (job.done && idx >= job.lines.size()) { onDone.run(); return; }
+                    if (job.done) { onDone.run(); return; }
                     Thread.sleep(80);
                 }
             } catch (InterruptedException ignored) {}
@@ -73,13 +73,7 @@ public class SyncService {
 
     // ── Playlist registry (CSV) ───────────────────────────────────────────────
 
-    public static class PlaylistEntry {
-        public final String name, url, lastSynced;
-        public final long tracks;
-        public PlaylistEntry(String name, String url, String lastSynced, long tracks) {
-            this.name = name; this.url = url; this.lastSynced = lastSynced; this.tracks = tracks;
-        }
-    }
+    public record PlaylistEntry(String name, String url, String lastSynced, long tracks) { }
 
     public List<PlaylistEntry> listSyncedPlaylists() {
         Path base = musicBase();
@@ -261,10 +255,10 @@ public class SyncService {
                     for (Path src : files.filter(p -> !Files.isDirectory(p)).toList()) {
                         String fn = src.getFileName().toString();
                         int dot = fn.lastIndexOf('.');
-                        String base = dot >= 0 ? fn.substring(0, dot) : fn;
+                        StringBuilder base = new StringBuilder(dot >= 0 ? fn.substring(0, dot) : fn);
                         String ext  = dot >= 0 ? fn.substring(dot) : "";
                         Path dest = targetDir.resolve(base + ext);
-                        while (Files.exists(dest)) { base += INVISIBLE; dest = targetDir.resolve(base + ext); }
+                        while (Files.exists(dest)) { base.append(INVISIBLE); dest = targetDir.resolve(base + ext); }
                         Files.move(src, dest);
                     }
                 }
