@@ -43,7 +43,7 @@ function mirrorSpectrum(half: Float32Array): Float32Array {
  * increasing toward the treble end, purely to make the shape read as
  * balanced and lively. It has nothing to do with acoustic accuracy.
  */
-const TREBLE_BOOST = 1.3;   // treble bins get up to (1 + TREBLE_BOOST)x gain
+const TREBLE_BOOST = 0.6;   // treble bins get up to (1 + TREBLE_BOOST)x gain
 function boostTreble(spectrum: Float32Array): Float32Array {
   const M = spectrum.length;
   const out = new Float32Array(M);
@@ -78,7 +78,7 @@ function applySensitivity(spectrum: Float32Array): Float32Array {
 }
 
 // Asymmetric envelope: fast attack (responsive), slow release (smooth decay)
-const ATTACK = 0.40, RELEASE = 0.07;
+const ATTACK = 0.40, RELEASE = 0.14;
 function smoothTowards(cur: Float32Array, tgt: Float32Array) {
   for (let i = 0; i < cur.length; i++) {
     const t = tgt[i];

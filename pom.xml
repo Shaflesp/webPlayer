@@ -78,7 +78,7 @@
                                 <argument>-c</argument>
                                 <argument>
                                     cd src/frontend &amp;&amp;
-                                    npm install --prefer-offline &amp;&amp;
+                                    npm ci &amp;&amp;
                                     npm run build
                                 </argument>
                             </arguments>
