@@ -202,12 +202,13 @@ public class SyncService {
             // 2. Download into %(id)s/ subfolders
             String targetDir   = musicDir + "/" + title;
             String archiveFile = targetDir + "/archive.txt";
-            Files.createDirectories(Path.of(targetDir));
+            Path targetDirPath = Path.of(targetDir);
+            Files.createDirectories(targetDirPath);
             job.lines.add("Target: " + targetDir);
             job.lines.add("Starting download…");
 
             List<String> dlArgs = new ArrayList<>(List.of(
-                    ytdlp, //"-i",
+                    ytdlp, "-i",
                     "-f",  "bestaudio[acodec=opus]/bestaudio",
                     "-x",  "--audio-format", "best",
                     "--embed-thumbnail", "--add-metadata",
@@ -218,17 +219,31 @@ public class SyncService {
             dlArgs.add(job.url);
 
             Process proc = new ProcessBuilder(dlArgs).redirectErrorStream(true).start();
+            int linesBefore = job.lines.size();
             try (BufferedReader r = new BufferedReader(new InputStreamReader(proc.getInputStream()))) {
                 String line; while ((line = r.readLine()) != null) job.lines.add(line);
             }
             int exit = proc.waitFor();
-            job.ok = (exit == 0);
-            if (!job.ok) { job.lines.add("✗ yt-dlp exited with code " + exit); job.done = true; return; }
+            boolean producedOutput = job.lines.size() > linesBefore;
+
+            job.ok = (exit == 0) || producedOutput;
+
+            if (!job.ok) {
+                job.lines.add("✗ yt-dlp exited with code " + exit + " and produced no output");
+                job.done = true; return;
+            }
+            if (exit != 0) {
+                job.lines.add("Warning: some videos were skipped (unavailable/private/deleted) — exit code " + exit + ", continuing.");
+            }
 
             // 3. Move files out of ID subfolders, deduplicate with invisible char
             job.lines.add("Extracting songs from temporary folders…");
-            extractIdFolders(Path.of(targetDir), job);
-            job.lines.add("✓ Sync complete — " + targetDir);
+            try {
+                extractIdFolders(targetDirPath, job);
+                job.lines.add("✓ Sync complete — " + targetDir);
+            } catch (IOException e) {
+                job.lines.add("Warning: some files could not be moved out of temp folders — " + e.getMessage());
+            }
 
             // 4. Save URL to CSV + trigger MPD update
             savePlaylistEntry(title, job.url);

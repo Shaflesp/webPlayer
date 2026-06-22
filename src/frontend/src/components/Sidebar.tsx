@@ -4,6 +4,8 @@ import { Tooltip } from './Tooltip';
 import {
   playId, deletePos, clearQueue, addUri, addPlay,
   fetchBrowse, fetchSearch, artUrl, basename, updateDb,
+  fetchPlaylists, fetchPlaylistSongs, playlistLoad, playlistSave, playlistDelete,
+  type PlaylistEntry,
 } from '../api';
 import type { MPDSong, MPDItem, SidebarTab } from '../types';
 
@@ -12,7 +14,7 @@ import type { MPDSong, MPDItem, SidebarTab } from '../types';
 interface QueueItemProps { song: MPDSong; pos: number; isPlaying: boolean; }
 
 const QueueItem = memo(({ song, pos, isPlaying }: QueueItemProps) => {
-  const url   = song.file ? artUrl(song.file) : null;
+  const url    = song.file ? artUrl(song.file) : null;
   const title  = song.Title  ?? (song.file ? basename(song.file) : '?');
   const artist = song.Artist ?? song.AlbumArtist ?? '—';
 
@@ -50,7 +52,6 @@ function QueueTab() {
   const songid  = useStore(s => s.status.songid);
   const listRef = useRef<HTMLDivElement>(null);
 
-  // Scroll playing item into view whenever it changes
   useEffect(() => {
     listRef.current?.querySelector('.playing')
         ?.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
@@ -77,11 +78,11 @@ function QueueTab() {
 interface LibItemProps { item: MPDItem; onNavigate: (uri: string) => void; }
 
 const LibItem = memo(({ item, onNavigate }: LibItemProps) => {
-  const type  = item._type;
-  const file  = item.file ?? '';
-  const title = item.Title ?? (file ? basename(file) : item.directory?.split('/').pop() ?? '?');
+  const type   = item._type;
+  const file   = item.file ?? '';
+  const title  = item.Title ?? (file ? basename(file) : item.directory?.split('/').pop() ?? '?');
   const artist = item.Artist ?? item.AlbumArtist ?? '';
-  const url   = type === 'file' && file ? artUrl(file) : null;
+  const url    = type === 'file' && file ? artUrl(file) : null;
 
   if (type === 'directory') {
     const name = item.directory?.split('/').pop() ?? item.directory ?? '?';
@@ -245,12 +246,178 @@ function SearchTab() {
   );
 }
 
+// ── Playlists (MPD-native: load/save/delete, separate from YouTube sync) ─────
+
+function PlaylistsTab() {
+  const [playlists, setPlaylists] = useState<PlaylistEntry[]>([]);
+  const [openName,  setOpenName]  = useState<string | null>(null);
+  const [songs,     setSongs]     = useState<MPDSong[]>([]);
+  const [saveOpen,  setSaveOpen]  = useState(false);
+  const [saveName,  setSaveName]  = useState('');
+  const [error,     setError]     = useState<string | null>(null);
+
+  const load = useCallback(() => {
+    fetchPlaylists().then(setPlaylists).catch(() => setPlaylists([]));
+  }, []);
+
+  useEffect(() => { load(); }, [load]);
+
+  const openPlaylist = useCallback((name: string) => {
+    setOpenName(name);
+    setError(null);
+    fetchPlaylistSongs(name).then(setSongs).catch(() => setSongs([]));
+  }, []);
+
+  const back = useCallback(() => { setOpenName(null); setSongs([]); }, []);
+
+  const handleLoad = useCallback(async (name: string) => {
+    setError(null);
+    try { await playlistLoad(name); }
+    catch (e) { setError(`Couldn't load "${name}": ${(e as Error).message}`); }
+  }, []);
+
+  const handleDelete = useCallback(async (name: string) => {
+    setError(null);
+    try {
+      await playlistDelete(name);
+      if (openName === name) back();
+      load();
+    } catch (e) {
+      setError(`Couldn't delete "${name}": ${(e as Error).message}`);
+    }
+  }, [openName, load, back]);
+
+  const handleSave = useCallback(async () => {
+    const name = saveName.trim();
+    if (!name) return;
+    setError(null);
+    try {
+      await playlistSave(name);
+      setSaveOpen(false);
+      setSaveName('');
+      load();
+    } catch (e) {
+      setError(`Couldn't save "${name}": ${(e as Error).message}`);
+    }
+  }, [saveName, load]);
+
+  const ErrorLine = error && (
+      <div style={{ padding: '6px 12px', fontSize: 12, color: '#f87171' }}>{error}</div>
+  );
+
+  // ── Viewing one playlist's contents ───────────────────────────────────────
+  if (openName) {
+    return (
+        <>
+          <div className="tab-toolbar">
+            <Tooltip text="Back">
+              <button className="icon-btn" onClick={back}><i className="fas fa-arrow-left" /></button>
+            </Tooltip>
+            <span className="toolbar-label">{openName}</span>
+            <Tooltip text="Load into queue">
+              <button className="icon-btn" onClick={() => handleLoad(openName)}>
+                <i className="fas fa-circle-play" />
+              </button>
+            </Tooltip>
+            <Tooltip text="Delete playlist">
+              <button className="icon-btn" onClick={() => handleDelete(openName)}>
+                <i className="fas fa-trash-can" />
+              </button>
+            </Tooltip>
+          </div>
+          {ErrorLine}
+          <div className="scroll-list">
+            {songs.length === 0 ? (
+                <div className="empty-msg">Empty playlist</div>
+            ) : (
+                songs.map((song, i) => {
+                  const file   = song.file ?? '';
+                  const title  = song.Title  ?? basename(file);
+                  const artist = song.Artist ?? song.AlbumArtist ?? '—';
+                  const url    = file ? artUrl(file) : null;
+                  return (
+                      <div key={file || i} className="list-item" onDoubleClick={() => addPlay(file)}>
+                        <div className="item-thumb">
+                          {url && <img src={url} alt="" onError={e => (e.currentTarget.style.display = 'none')} />}
+                          <div className="thumb-fallback"><i className="fas fa-music" /></div>
+                        </div>
+                        <div className="item-info">
+                          <span className="item-title">{title}</span>
+                          <span className="item-sub">{artist}</span>
+                        </div>
+                      </div>
+                  );
+                })
+            )}
+          </div>
+        </>
+    );
+  }
+
+  // ── Playlist list view ─────────────────────────────────────────────────────
+  return (
+      <>
+        <div className="tab-toolbar">
+          <span className="toolbar-label">Playlists ({playlists.length})</span>
+          <Tooltip text="Save current queue as a playlist">
+            <button className="icon-btn" onClick={() => setSaveOpen(v => !v)}>
+              <i className="fas fa-plus" />
+            </button>
+          </Tooltip>
+        </div>
+
+        {saveOpen && (
+            <div style={{ display: 'flex', gap: 6, margin: '0 12px 8px' }}>
+              <input
+                  type="text"
+                  placeholder="Playlist name…"
+                  autoFocus
+                  value={saveName}
+                  onChange={e => setSaveName(e.target.value)}
+                  onKeyDown={e => e.key === 'Enter' && handleSave()}
+                  style={{
+                    flex: 1, background: 'var(--bg-card)', border: '1px solid var(--border)',
+                    borderRadius: 8, padding: '7px 10px', color: 'var(--text)', fontSize: 13, outline: 'none',
+                  }}
+              />
+              <button className="icon-btn" onClick={handleSave}><i className="fas fa-check" /></button>
+              <button className="icon-btn" onClick={() => { setSaveOpen(false); setSaveName(''); }}>
+                <i className="fas fa-xmark" />
+              </button>
+            </div>
+        )}
+
+        {ErrorLine}
+
+        <div className="scroll-list">
+          {playlists.length === 0 ? (
+              <div className="empty-msg">
+                <i className="fas fa-bookmark" /><br />No saved playlists
+              </div>
+          ) : (
+              playlists.map(p => (
+                  <div key={p.name} className="list-item" onClick={() => openPlaylist(p.name)}>
+                    <div className="item-thumb"><i className="fas fa-bookmark" /></div>
+                    <div className="item-info"><span className="item-title">{p.name}</span></div>
+                    <button
+                        className="item-remove"
+                        onClick={e => { e.stopPropagation(); handleDelete(p.name); }}
+                    ><i className="fas fa-xmark" /></button>
+                  </div>
+              ))
+          )}
+        </div>
+      </>
+  );
+}
+
 // ── Sidebar shell ─────────────────────────────────────────────────────────────
 
 const TABS: { id: SidebarTab; label: string; icon: string }[] = [
-  { id: 'queue',   label: 'Queue',   icon: 'fa-list-ul'       },
-  { id: 'library', label: 'Library', icon: 'fa-folder-open'   },
-  { id: 'search',  label: 'Search',  icon: 'fa-magnifying-glass' },
+  { id: 'queue',     label: 'Queue',     icon: 'fa-list-ul'          },
+  { id: 'library',   label: 'Library',   icon: 'fa-folder-open'      },
+  { id: 'playlists', label: 'Playlists', icon: 'fa-bookmark'         },
+  { id: 'search',    label: 'Search',    icon: 'fa-magnifying-glass' },
 ];
 
 export function Sidebar() {
@@ -292,7 +459,6 @@ export function Sidebar() {
           </div>
         </div>
 
-        {/* Queue tab */}
         {tab === 'queue' && (
             <>
               <div className="tab-toolbar">
@@ -307,11 +473,9 @@ export function Sidebar() {
             </>
         )}
 
-        {/* Library tab */}
-        {tab === 'library' && <LibraryTab />}
-
-        {/* Search tab */}
-        {tab === 'search' && <SearchTab />}
+        {tab === 'library'   && <LibraryTab />}
+        {tab === 'playlists' && <PlaylistsTab />}
+        {tab === 'search'    && <SearchTab />}
       </aside>
   );
 }

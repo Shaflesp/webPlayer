@@ -8,8 +8,9 @@ import { Settings }   from './components/Settings';
 import { SyncPanel }  from './components/SyncPanel';
 import {
   play, pause, resume, next, previous, setVol,
-  fetchSettings,
+  fetchSettings, fetchDependencyStatus,
 } from './api';
+import type { DependencyStatus } from './types';
 
 function hexToRgb(hex: string): [number, number, number] {
   const h = hex.replace('#', '');
@@ -17,23 +18,40 @@ function hexToRgb(hex: string): [number, number, number] {
   return [(n >> 16) & 255, (n >> 8) & 255, n & 255];
 }
 
+/** Builds one combined message from whichever dependencies are missing, or null if all are fine. */
+function buildDepWarning(status: DependencyStatus): string | null {
+  const issues: string[] = [];
+  if (!status.mpd.ok)    issues.push('MPD not detected');
+  if (!status.ffmpeg.ok) issues.push('ffmpeg not detected');
+  if (!status.ytdlp.ok)  issues.push('yt-dlp not available');
+  if (issues.length === 0) return null;
+  return issues.join(' · ') + ' — some features may not work.';
+}
+
 export function App() {
   const status      = useStore(s => s.status);
   const settings    = useStore(s => s.settings);
   const setSettings = useStore(s => s.setSettings);
-  const errorMsg    = useStore(s => s.errorMsg);
-  const setError    = useStore(s => s.setError);
+  const errorMsg     = useStore(s => s.errorMsg);
+  const setError     = useStore(s => s.setError);
+  const depWarning    = useStore(s => s.depWarning);
+  const setDepWarning = useStore(s => s.setDepWarning);
 
   // ── Hydrate persisted settings from the server on startup ─────────────────
-  // The store starts with hardcoded JS defaults (see DEFAULT_SETTINGS in
-  // store.ts). Without this fetch, every saved preference — accent colour,
-  // background opacity, visualizer mode, etc. — only takes effect once the
-  // user manually opens the Settings panel, making it LOOK like settings
-  // reset on every relaunch even though they're correctly persisted server-side.
   useEffect(() => {
     fetchSettings()
         .then(setSettings)
         .catch(() => { /* server not reachable yet — keep defaults, poller will retry */ });
+  }, []);
+
+  // ── Check dependency health once on startup ────────────────────────────────
+  // Surfaces missing mpd/ffmpeg/yt-dlp the same way a connection problem is
+  // surfaced, instead of silently failing later (e.g. a sync erroring out
+  // with no obvious cause because ffmpeg was never installed).
+  useEffect(() => {
+    fetchDependencyStatus()
+        .then(s => setDepWarning(buildDepWarning(s)))
+        .catch(() => { /* status endpoint not reachable — not critical, skip */ });
   }, []);
 
   // Start polling (queue smart-updates are baked in)
@@ -95,6 +113,16 @@ export function App() {
                 <i className="fas fa-triangle-exclamation" />
                 <span>{errorMsg}</span>
                 <button onClick={() => setError(null)}>
+                  <i className="fas fa-xmark" />
+                </button>
+              </div>
+          )}
+
+          {depWarning && (
+              <div className="error-banner" style={{ top: errorMsg ? 56 : 12 }}>
+                <i className="fas fa-triangle-exclamation" />
+                <span>{depWarning}</span>
+                <button onClick={() => setDepWarning(null)}>
                   <i className="fas fa-xmark" />
                 </button>
               </div>

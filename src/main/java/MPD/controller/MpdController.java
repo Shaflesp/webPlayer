@@ -2,138 +2,191 @@ package MPD.controller;
 
 import MPD.MPDClient;
 import MPD.service.MpdService;
+import com.google.gson.*;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.*;
 
-/**
- * REST bridge for all MPD commands.
- * Returns plain Java Maps/Lists — serialized by GsonHttpMessageConverter.
- */
 @RestController
 @RequestMapping("/MPDServlet")
 public class MpdController {
 
     private static final int SEARCH_LIMIT = 200;
     private final MpdService mpd;
+    private static final Gson GSON = new GsonBuilder().create();
 
     public MpdController(MpdService mpd) { this.mpd = mpd; }
 
     // ── GET ───────────────────────────────────────────────────────────────────
 
     @GetMapping
-    public Object get(
-            @RequestParam String action,
-            @RequestParam(required = false) String uri,
-            @RequestParam(required = false) String q) throws Exception {
-
+    public ResponseEntity<JsonElement> get(@RequestParam String action,
+                                           @RequestParam(required = false) String uri,
+                                           @RequestParam(required = false) String q,
+                                           @RequestParam(required = false) String name)
+            throws Exception {
         try (MPDClient client = mpd.connect()) {
-            return switch (action) {
-                case "nowplaying"  -> nowPlaying(client);
-                case "status"      -> toStatusMap(client.commandAsMap("status"));
-                case "currentsong" -> client.commandAsMap("currentsong");
-                case "queue"       -> client.commandAsBlocks("playlistinfo", "file");
-                case "browse"      -> client.commandAsLsBlocks(
-                                        "lsinfo" + (uri != null && !uri.isBlank()
-                                            ? " \"" + MPDClient.escape(uri) + "\""
-                                            : ""));
-                case "search"      -> search(client, q != null ? q : "");
-                default            -> ResponseEntity.badRequest()
-                                        .body(Map.of("error", "Unknown action: " + action));
+            JsonElement result = switch (action) {
+                case "nowplaying"    -> nowPlaying(client);
+                case "status"        -> GSON.toJsonTree(client.commandAsMap("status"));
+                case "currentsong"   -> GSON.toJsonTree(client.commandAsMap("currentsong"));
+                case "queue"         -> playlistInfo(client);
+                case "browse"        -> browse(client, uri != null ? uri : "");
+                case "search"        -> search(client, q != null ? q : "");
+                case "playlists"     -> playlists(client);
+                case "playlistsongs" -> playlistSongs(client, name);
+                default              -> throw new IllegalArgumentException("Unknown action: " + action);
             };
+            return ResponseEntity.ok(result);
         }
     }
 
     // ── POST ──────────────────────────────────────────────────────────────────
 
     @PostMapping
-    public Map<String, Object> post(@RequestBody Map<String, Object> body) throws Exception {
+    public ResponseEntity<Map<String, Object>> post(@RequestBody Map<String, Object> body)
+            throws Exception {
         String action = (String) body.getOrDefault("action", "");
         try (MPDClient client = mpd.connect()) {
             switch (action) {
-                case "play"          -> client.command("play");
-                case "pause"         -> client.command("pause 1");
-                case "resume"        -> client.command("pause 0");
-                case "stop"          -> client.command("stop");
-                case "next"          -> client.command("next");
-                case "previous"      -> client.command("previous");
-                case "playid"        -> client.command("playid "  + toInt(body.get("id")));
-                case "delete"        -> client.command("delete "  + toInt(body.get("pos")));
-                case "clear"         -> client.command("clear");
-                case "update"        -> client.command("update");
-                case "seek"          -> client.command("seekcur " + toTime(body.get("time")));
-                case "setvol"        -> client.command("setvol "  + toInt(body.get("volume")));
-                case "add"           -> client.command("add \""   + MPDClient.escape(str(body.get("uri"))) + "\"");
-                case "addplay"       -> {
-                    client.command("add \"" + MPDClient.escape(str(body.get("uri"))) + "\"");
-                    int len = parseInt(client.commandAsMap("status").get("playlistlength"));
-                    client.command("play " + Math.max(0, len - 1));
+                case "play"           -> client.command("play");
+                case "pause"          -> client.command("pause 1");
+                case "resume"         -> client.command("pause 0");
+                case "stop"           -> client.command("stop");
+                case "next"           -> client.command("next");
+                case "previous"       -> client.command("previous");
+                case "playid"         -> client.command("playid "  + toInt(body.get("id")));
+                case "delete"         -> client.command("delete "  + toInt(body.get("pos")));
+                case "clear"          -> client.command("clear");
+                case "update"         -> client.command("update");
+                case "seek"           -> client.command("seekcur " + toDouble(body.get("time")));
+                case "setvol"         -> client.command("setvol "  + toInt(body.get("volume")));
+                case "add"            -> client.command("add \""   + body.get("uri") + "\"");
+                case "addplay"        -> {
+                    client.command("add \"" + body.get("uri") + "\"");
+                    Map<String, String> st = client.commandAsMap("status");
+                    int len = Integer.parseInt(st.getOrDefault("playlistlength", "1"));
+                    client.command("play " + (len - 1));
                 }
-                case "toggle_random" -> {
-                    String v = client.commandAsMap("status").getOrDefault("random", "0");
-                    client.command("random " + (v.equals("1") ? "0" : "1"));
+                case "move"           -> client.command("move "  + toInt(body.get("from")) + " " + toInt(body.get("to")));
+                case "toggle_random"  -> {
+                    Map<String, String> st = client.commandAsMap("status");
+                    client.command("random " + (st.getOrDefault("random", "0").equals("1") ? "0" : "1"));
                 }
-                case "toggle_repeat" -> {
-                    String v = client.commandAsMap("status").getOrDefault("repeat", "0");
-                    client.command("repeat " + (v.equals("1") ? "0" : "1"));
+                case "toggle_repeat"  -> {
+                    Map<String, String> st = client.commandAsMap("status");
+                    client.command("repeat " + (st.getOrDefault("repeat", "0").equals("1") ? "0" : "1"));
                 }
-                case "toggle_single" -> {
-                    String v = client.commandAsMap("status").getOrDefault("single", "0");
-                    client.command("single " + (v.equals("1") ? "0" : "1"));
+                case "toggle_single"  -> {
+                    Map<String, String> st = client.commandAsMap("status");
+                    client.command("single " + (st.getOrDefault("single", "0").equals("1") ? "0" : "1"));
                 }
+                case "playlistload"   -> client.command("load \"" + MPDClient.escape((String) body.get("name")) + "\"");
+                case "playlistsave"   -> {
+                    String esc = MPDClient.escape((String) body.get("name"));
+                    // "save" fails if a playlist with this name already exists on
+                    // older MPD versions (no overwrite mode) — rm-then-save gives
+                    // idempotent create-or-overwrite behaviour on any MPD version.
+                    try { client.command("rm \"" + esc + "\""); } catch (Exception ignored) {}
+                    client.command("save \"" + esc + "\"");
+                }
+                case "playlistrm"     -> client.command("rm \"" + MPDClient.escape((String) body.get("name")) + "\"");
                 default -> throw new IllegalArgumentException("Unknown action: " + action);
             }
-            return Map.of("ok", true);
+            return ResponseEntity.ok(Map.of("ok", true));
         }
     }
 
-    // ── Helpers ───────────────────────────────────────────────────────────────
+    // ── Type coercion helpers ─────────────────────────────────────────────────
 
-    private Map<String, Object> nowPlaying(MPDClient client) throws Exception {
-        Map<String, String> status = client.commandAsMap("status");
-        Map<String, String> song   = client.commandAsMap("currentsong");
-        Map<String, Object> out    = new LinkedHashMap<>();
-        out.put("status", toStatusMap(status));
-        out.put("song",   song);
-        return out;
+    private static int toInt(Object v) {
+        if (v instanceof Number n) return n.intValue();
+        return Integer.parseInt(String.valueOf(v));
     }
 
-    private Map<String, Object> toStatusMap(Map<String, String> m) {
-        Map<String, Object> s = new LinkedHashMap<>();
-        s.put("state",           m.getOrDefault("state", "stop"));
-        s.put("elapsed",         parseDouble(m.get("elapsed")));
-        s.put("duration",        parseDouble(m.get("duration")));
-        s.put("volume",          parseInt(m.get("volume")));
-        s.put("random",          parseInt(m.get("random")));
-        s.put("repeat",          parseInt(m.get("repeat")));
-        s.put("single",          parseInt(m.get("single")));
-        s.put("consume",         parseInt(m.get("consume")));
-        s.put("songid",          parseInt(m.get("songid")));
-        s.put("playlistlength",  parseInt(m.get("playlistlength")));
-        s.put("playlistversion", parseInt(m.get("playlist")));   // MPD calls it "playlist"
-        s.put("bitrate",         parseInt(m.get("bitrate")));
-        return s;
-    }
-
-    private List<Map<String, String>> search(MPDClient client, String q) throws Exception {
-        if (q.isBlank()) return List.of();
-        List<Map<String, String>> results =
-            client.commandAsBlocks("search any \"" + MPDClient.escape(q) + "\"", "file");
-        return results.size() > SEARCH_LIMIT ? results.subList(0, SEARCH_LIMIT) : results;
-    }
-
-    // ── Type helpers (Gson deserialises all JSON numbers as Double) ────────────
-
-    private static int    toInt(Object v)  { return v instanceof Number n ? n.intValue()    : Integer.parseInt(String.valueOf(v)); }
-    private static int    parseInt(String v) { try { return v == null ? 0 : Integer.parseInt(v.trim()); } catch (NumberFormatException e) { return 0; } }
-    private static double parseDouble(String v) { try { return v == null ? 0 : Double.parseDouble(v.trim()); } catch (NumberFormatException e) { return 0; } }
-    private static String toTime(Object v) {
+    private static String toDouble(Object v) {
         if (v instanceof Number n) {
             double d = n.doubleValue();
             return d == Math.floor(d) ? String.valueOf((long) d) : String.valueOf(d);
         }
         return String.valueOf(v);
     }
-    private static String str(Object v) { return v == null ? "" : String.valueOf(v); }
+
+    // ── Helpers ───────────────────────────────────────────────────────────────
+
+    private JsonObject nowPlaying(MPDClient client) throws Exception {
+        Map<String, String> status = client.commandAsMap("status");
+        Map<String, String> song   = client.commandAsMap("currentsong");
+        JsonObject obj = new JsonObject();
+        obj.add("status", toStatusJson(status));
+        obj.add("song",   GSON.toJsonTree(song));
+        return obj;
+    }
+
+    private JsonObject toStatusJson(Map<String, String> m) {
+        JsonObject s = new JsonObject();
+        s.addProperty("state",           m.getOrDefault("state",           "stop"));
+        s.addProperty("elapsed",         parseDouble(m.get("elapsed")));
+        s.addProperty("duration",        parseDouble(m.get("duration")));
+        s.addProperty("volume",          parseInt(m.get("volume")));
+        s.addProperty("random",          parseInt(m.get("random")));
+        s.addProperty("repeat",          parseInt(m.get("repeat")));
+        s.addProperty("single",          parseInt(m.get("single")));
+        s.addProperty("consume",         parseInt(m.get("consume")));
+        s.addProperty("songid",          parseInt(m.get("songid")));
+        s.addProperty("playlistlength",  parseInt(m.get("playlistlength")));
+        s.addProperty("playlistversion", parseInt(m.get("playlist")));
+        s.addProperty("bitrate",         parseInt(m.get("bitrate")));
+        return s;
+    }
+
+    private JsonArray playlistInfo(MPDClient client) throws Exception {
+        List<Map<String, String>> songs = client.commandAsBlocks("playlistinfo", "file");
+        return GSON.toJsonTree(songs).getAsJsonArray();
+    }
+
+    private JsonArray browse(MPDClient client, String uri) throws Exception {
+        String cmd = uri.isEmpty() ? "lsinfo" : "lsinfo \"" + MPDClient.escape(uri) + "\"";
+        List<Map<String, String>> items = client.commandAsLsBlocks(cmd);
+        JsonArray arr = new JsonArray();
+        for (Map<String, String> item : items) arr.add(GSON.toJsonTree(item));
+        return arr;
+    }
+
+    private JsonArray search(MPDClient client, String q) throws Exception {
+        if (q.isBlank()) return new JsonArray();
+        List<Map<String, String>> results =
+                client.commandAsBlocks("search any \"" + MPDClient.escape(q) + "\"", "file");
+        JsonArray arr = new JsonArray();
+        int i = 0;
+        for (Map<String, String> r : results) {
+            if (i++ >= SEARCH_LIMIT) break;
+            arr.add(GSON.toJsonTree(r));
+        }
+        return arr;
+    }
+
+    /** MPD's listplaylists returns repeating "playlist: NAME" / "Last-Modified: ..." blocks. */
+    private JsonArray playlists(MPDClient client) throws Exception {
+        List<Map<String, String>> entries = client.commandAsBlocks("listplaylists", "playlist");
+        return GSON.toJsonTree(entries).getAsJsonArray();
+    }
+
+    /** MPD's listplaylistinfo NAME returns full song blocks, same shape as playlistinfo. */
+    private JsonArray playlistSongs(MPDClient client, String name) throws Exception {
+        if (name == null || name.isBlank()) return new JsonArray();
+        List<Map<String, String>> songs = client.commandAsBlocks(
+                "listplaylistinfo \"" + MPDClient.escape(name) + "\"", "file");
+        return GSON.toJsonTree(songs).getAsJsonArray();
+    }
+
+    private static double parseDouble(String v) {
+        if (v == null) return 0;
+        try { return Double.parseDouble(v); } catch (NumberFormatException e) { return 0; }
+    }
+    private static int parseInt(String v) {
+        if (v == null) return 0;
+        try { return Integer.parseInt(v); } catch (NumberFormatException e) { return 0; }
+    }
 }

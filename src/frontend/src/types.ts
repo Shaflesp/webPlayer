@@ -39,7 +39,13 @@ export interface MPDItem {
   [key: string]: string | undefined;
 }
 
+export interface DependencyStatus {
+  ytdlp:  { ok: boolean; path: string; note: string };
+  mpd:    { ok: boolean };
+  ffmpeg: { ok: boolean };
+}
+
 export type AppSettings = Record<string, string>;
 
-export type SidebarTab = 'queue' | 'library' | 'search';
+export type SidebarTab = 'queue' | 'library' | 'search' | 'playlists';
 export type VizMode    = 'ellipse' | 'bar' | 'off';

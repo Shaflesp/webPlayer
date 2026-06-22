@@ -34,6 +34,7 @@ interface PlayerState {
   settingsOpen: boolean;
   syncOpen:     boolean;
   errorMsg:     string | null;
+  depWarning:   string | null;
 
   setStatus:       (s: MPDStatus)            => void;
   setCurrentSong:  (s: MPDSong)              => void;
@@ -44,6 +45,7 @@ interface PlayerState {
   setSettingsOpen: (open: boolean)           => void;
   setSyncOpen:     (open: boolean)           => void;
   setError:        (msg: string | null)      => void;
+  setDepWarning:   (msg: string | null)      => void;
 }
 
 // ── Store ─────────────────────────────────────────────────────────────────────
@@ -57,6 +59,7 @@ export const useStore = create<PlayerState>((set) => ({
   settingsOpen: false,
   syncOpen:     false,
   errorMsg:     null,
+  depWarning:   null,
 
   setStatus:       (status)       => set({ status }),
   setCurrentSong:  (currentSong)  => set({ currentSong }),
@@ -69,4 +72,5 @@ export const useStore = create<PlayerState>((set) => ({
   setSettingsOpen: (settingsOpen) => set({ settingsOpen }),
   setSyncOpen:     (syncOpen)     => set({ syncOpen }),
   setError:        (errorMsg)     => set({ errorMsg }),
+  setDepWarning:   (depWarning)   => set({ depWarning }),
 }));
