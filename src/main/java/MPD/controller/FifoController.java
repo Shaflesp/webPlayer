@@ -38,24 +38,8 @@ public class FifoController {
 
                     if (!active.get()) break;
                     try {
-                        // IMPORTANT: explicit MediaType.TEXT_PLAIN.
-                        // Without this, Spring's converter resolution can pick the
-                        // globally-registered GsonHttpMessageConverter (added for
-                        // /MPDServlet's JSON responses) instead of a plain string
-                        // converter — and Gson serializes a String as a JSON string
-                        // literal, wrapping it in quotes. The browser then receives
-                        // "12,45,200,..." (quotes included as literal text), which
-                        // breaks parseInt on the first/last value of every frame.
                         emitter.send(SseEmitter.event().data(sb.toString(), MediaType.TEXT_PLAIN));
                     } catch (IOException | IllegalStateException e) {
-                        // Client disconnected. completeWithError() (not a bare break,
-                        // and not complete()) is what actually matters here: it tells
-                        // Spring's async machinery the stream died due to an error so
-                        // it tears down the AsyncContext immediately. Leaving it
-                        // dangling is what causes Tomcat to rediscover the dead socket
-                        // later on ITS OWN thread (tomcat-handler-N, not this one) and
-                        // retry a flush there — outside this try/catch entirely, which
-                        // is exactly the unhandled "Relais brisé (pipe)" seen in logs.
                         active.set(false);
                         try { emitter.completeWithError(e); } catch (Exception ignored) {}
                         break;

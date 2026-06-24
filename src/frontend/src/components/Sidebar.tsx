@@ -2,7 +2,7 @@ import { useState, useEffect, memo, useCallback, useRef } from 'react';
 import { useStore } from '../store';
 import { Tooltip } from './Tooltip';
 import {
-  playId, deletePos, clearQueue, addUri, addPlay,
+  playId, deletePos, clearQueue, addUri, addPlay, moveQueue,
   fetchBrowse, fetchSearch, artUrl, basename, updateDb,
   fetchPlaylists, fetchPlaylistSongs, playlistLoad, playlistSave, playlistDelete,
   type PlaylistEntry,
@@ -11,18 +11,34 @@ import type { MPDSong, MPDItem, SidebarTab } from '../types';
 
 // ── Queue ─────────────────────────────────────────────────────────────────────
 
-interface QueueItemProps { song: MPDSong; pos: number; isPlaying: boolean; }
+interface QueueItemProps {
+  song: MPDSong; pos: number; isPlaying: boolean;
+  isDragging: boolean; isOver: boolean;
+  onDragStart: (e: React.DragEvent) => void;
+  onDragOver:  (e: React.DragEvent) => void;
+  onDrop:      (e: React.DragEvent) => void;
+  onDragEnd:   () => void;
+}
 
-const QueueItem = memo(({ song, pos, isPlaying }: QueueItemProps) => {
+const QueueItem = memo(({
+                          song, pos, isPlaying, isDragging, isOver,
+                          onDragStart, onDragOver, onDrop, onDragEnd,
+                        }: QueueItemProps) => {
   const url    = song.file ? artUrl(song.file) : null;
   const title  = song.Title  ?? (song.file ? basename(song.file) : '?');
   const artist = song.Artist ?? song.AlbumArtist ?? '—';
 
   return (
       <div
-          className={`list-item${isPlaying ? ' playing' : ''}`}
+          className={`list-item${isPlaying ? ' playing' : ''}${isDragging ? ' dragging' : ''}${isOver ? ' drag-over' : ''}`}
+          draggable
+          onDragStart={onDragStart}
+          onDragOver={onDragOver}
+          onDrop={onDrop}
+          onDragEnd={onDragEnd}
           onClick={() => playId(parseInt(song.Id ?? '0'))}
       >
+        <i className="fas fa-grip-lines drag-handle" />
         <div className="item-thumb">
           {url && <img src={url} alt="" onError={e => (e.currentTarget.style.display = 'none')} />}
           <div className="thumb-fallback">
@@ -52,10 +68,37 @@ function QueueTab() {
   const songid  = useStore(s => s.status.songid);
   const listRef = useRef<HTMLDivElement>(null);
 
+  const [dragIndex, setDragIndex] = useState<number | null>(null);
+  const [overIndex, setOverIndex] = useState<number | null>(null);
+
   useEffect(() => {
     listRef.current?.querySelector('.playing')
         ?.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
   }, [songid]);
+
+  const handleDragStart = useCallback((index: number) => (e: React.DragEvent) => {
+    setDragIndex(index);
+    e.dataTransfer.effectAllowed = 'move';
+  }, []);
+
+  const handleDragOver = useCallback((index: number) => (e: React.DragEvent) => {
+    e.preventDefault(); // required to allow dropping
+    if (index !== overIndex) setOverIndex(index);
+  }, [overIndex]);
+
+  const handleDrop = useCallback((index: number) => (e: React.DragEvent) => {
+    e.preventDefault();
+    if (dragIndex !== null && dragIndex !== index) {
+      moveQueue(dragIndex, index).catch(() => {});
+    }
+    setDragIndex(null);
+    setOverIndex(null);
+  }, [dragIndex]);
+
+  const handleDragEnd = useCallback(() => {
+    setDragIndex(null);
+    setOverIndex(null);
+  }, []);
 
   return (
       <div className="scroll-list" ref={listRef}>
@@ -67,6 +110,12 @@ function QueueTab() {
                     song={song}
                     pos={i}
                     isPlaying={song.Id === String(songid)}
+                    isDragging={dragIndex === i}
+                    isOver={overIndex === i && dragIndex !== null && dragIndex !== i}
+                    onDragStart={handleDragStart(i)}
+                    onDragOver={handleDragOver(i)}
+                    onDrop={handleDrop(i)}
+                    onDragEnd={handleDragEnd}
                 />
             ))}
       </div>
