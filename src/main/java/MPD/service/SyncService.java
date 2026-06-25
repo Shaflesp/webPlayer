@@ -35,10 +35,43 @@ public class SyncService {
     public static class SyncJob {
         public final String jobId;
         public final String url;
-        public final CopyOnWriteArrayList<String> lines = new CopyOnWriteArrayList<>();
+        private final CopyOnWriteArrayList<String> lines = new CopyOnWriteArrayList<>();
         public volatile boolean done = false, ok = false;
         public volatile String  playlist = null;
+
+        /** Dedicated monitor for wait/notify signalling between log()/finish() and subscribe(). */
+        private final Object lock = new Object();
+
         SyncJob(String id, String url) { this.jobId = id; this.url = url; }
+
+        /** Appends a line and wakes any thread blocked in awaitChangeBeyond(). */
+        public void log(String line) {
+            lines.add(line);
+            synchronized (lock) { lock.notifyAll(); }
+        }
+
+        /** Marks the job finished and wakes any thread blocked in awaitChangeBeyond(). */
+        public void finish() {
+            done = true;
+            synchronized (lock) { lock.notifyAll(); }
+        }
+
+        public int lineCount()        { return lines.size(); }
+        public String lineAt(int idx) { return lines.get(idx); }
+
+        /**
+         * Blocks until either a line beyond `idx` is available or the job is
+         * done. The check and the wait() MUST happen inside the same
+         * synchronized block that log()/finish() notify on — otherwise a
+         * notify landing between an external check and a separate wait()
+         * call would be silently missed (the "lost wakeup" problem).
+         */
+        public void awaitChangeBeyond(int idx) throws InterruptedException {
+            synchronized (lock) {
+                if (done || idx < lineCount()) return; // already true, don't wait at all
+                lock.wait();
+            }
+        }
     }
 
     // ── Public API ────────────────────────────────────────────────────────────
@@ -48,8 +81,8 @@ public class SyncService {
         SyncJob job = new SyncJob(id, url);
         jobs.put(id, job);
         if (!deps.isYtDlpReady()) {
-            job.lines.add("ERROR: yt-dlp is not available. Check Settings → Dependencies.");
-            job.done = true;
+            job.log("ERROR: yt-dlp is not available. Check Settings → Dependencies.");
+            job.finish();
         } else {
             Thread.ofVirtual().name("yt-dlp-" + id).start(() -> run(job));
         }
@@ -58,14 +91,20 @@ public class SyncService {
 
     public SyncJob getJob(String jobId) { return jobs.get(jobId); }
 
+    /**
+     * Streams a job's log lines to a subscriber as they arrive, using wait/notify
+     * instead of polling — the subscriber thread is parked (zero CPU) until
+     * SyncJob.log()/finish() explicitly wakes it, rather than waking up every
+     * 80ms to check whether anything changed.
+     */
     public void subscribe(SyncJob job, Consumer<String> onLine, Runnable onDone) {
         Thread.ofVirtual().start(() -> {
             int idx = 0;
             try {
                 while (true) {
-                    while (idx < job.lines.size()) onLine.accept(job.lines.get(idx++));
+                    while (idx < job.lineCount()) onLine.accept(job.lineAt(idx++));
                     if (job.done) { onDone.run(); return; }
-                    Thread.sleep(80);
+                    job.awaitChangeBeyond(idx);
                 }
             } catch (InterruptedException ignored) {}
         });
@@ -105,7 +144,7 @@ public class SyncService {
         writeCsv(base, csv);
     }
 
-    private Map<String, String[]> readCsv(Path base) {
+    Map<String, String[]> readCsv(Path base) {
         Path file = base.resolve("webplayer-playlists.csv");
         Map<String, String[]> map = new LinkedHashMap<>();
         if (!Files.exists(file)) return map;
@@ -113,18 +152,26 @@ public class SyncService {
             String line;
             while ((line = r.readLine()) != null) {
                 if (line.isBlank() || line.startsWith("#")) continue;
-                int c1 = line.indexOf(','), c2 = c1 >= 0 ? line.indexOf(',', c1 + 1) : -1;
-                if (c1 < 0) continue;
-                String n = line.substring(0, c1).trim();
-                String u = c2 >= 0 ? line.substring(c1+1, c2).trim() : line.substring(c1+1).trim();
-                String t = c2 >= 0 ? line.substring(c2+1).trim() : "";
+                int firstComma = line.indexOf(',');
+                if (firstComma < 0) continue;
+                int lastComma = line.lastIndexOf(',');
+
+                String n = line.substring(0, firstComma).trim();
+                if (lastComma == firstComma) {
+                    // Only one comma total — no separate timestamp field on this line.
+                    map.put(n, new String[]{ line.substring(firstComma + 1).trim(), "" });
+                    continue;
+                }
+
+                String u = line.substring(firstComma + 1, lastComma).trim();
+                String t = line.substring(lastComma + 1).trim();
                 map.put(n, new String[]{ u, t });
             }
         } catch (IOException ignored) {}
         return map;
     }
 
-    private void writeCsv(Path base, Map<String, String[]> map) {
+    void writeCsv(Path base, Map<String, String[]> map) {
         try (BufferedWriter w = Files.newBufferedWriter(base.resolve("webplayer-playlists.csv"))) {
             w.write("# WebPlayer playlist registry — name,url,lastSynced\n");
             for (var e : map.entrySet())
@@ -181,10 +228,10 @@ public class SyncService {
             String browser  = detectBrowser();
 
             if (browser == null)
-                job.lines.add("Warning: no browser found — downloading anonymously.");
+                job.log("Warning: no browser found — downloading anonymously.");
 
             // 1. Fetch playlist title
-            job.lines.add("Fetching playlist info…");
+            job.log("Fetching playlist info…");
             List<String> titleArgs = new ArrayList<>(List.of(
                     ytdlp, "--no-warnings", "--flat-playlist",
                     "--print", "%(playlist_title)s", "--playlist-items", "1"
@@ -194,18 +241,20 @@ public class SyncService {
 
             String title = exec(titleArgs).stream().filter(l -> !l.isBlank()).findFirst().orElse("").trim();
             if (title.isEmpty()) {
-                job.lines.add("ERROR: could not get playlist title."); job.done = true; return;
+                job.log("ERROR: could not get playlist title.");
+                job.finish();
+                return;
             }
             job.playlist = title;
-            job.lines.add("Playlist identified: " + title);
+            job.log("Playlist identified: " + title);
 
             // 2. Download into %(id)s/ subfolders
             String targetDir   = musicDir + "/" + title;
             String archiveFile = targetDir + "/archive.txt";
             Path targetDirPath = Path.of(targetDir);
             Files.createDirectories(targetDirPath);
-            job.lines.add("Target: " + targetDir);
-            job.lines.add("Starting download…");
+            job.log("Target: " + targetDir);
+            job.log("Starting download…");
 
             List<String> dlArgs = new ArrayList<>(List.of(
                     ytdlp, "-i",
@@ -219,50 +268,51 @@ public class SyncService {
             dlArgs.add(job.url);
 
             Process proc = new ProcessBuilder(dlArgs).redirectErrorStream(true).start();
-            int linesBefore = job.lines.size();
+            int linesBefore = job.lineCount();
             try (BufferedReader r = new BufferedReader(new InputStreamReader(proc.getInputStream()))) {
-                String line; while ((line = r.readLine()) != null) job.lines.add(line);
+                String line; while ((line = r.readLine()) != null) job.log(line);
             }
             int exit = proc.waitFor();
-            boolean producedOutput = job.lines.size() > linesBefore;
-
+            boolean producedOutput = job.lineCount() > linesBefore;
             job.ok = (exit == 0) || producedOutput;
 
             if (!job.ok) {
-                job.lines.add("✗ yt-dlp exited with code " + exit + " and produced no output");
-                job.done = true; return;
+                job.log("✗ yt-dlp exited with code " + exit + " and produced no output");
+                job.finish();
+                return;
             }
             if (exit != 0) {
-                job.lines.add("Warning: some videos were skipped (unavailable/private/deleted) — exit code " + exit + ", continuing.");
+                job.log("Warning: some videos were skipped (unavailable/private/deleted) — exit code " + exit + ", continuing.");
             }
 
             // 3. Move files out of ID subfolders, deduplicate with invisible char
-            job.lines.add("Extracting songs from temporary folders…");
+            job.log("Extracting songs from temporary folders…");
             try {
                 extractIdFolders(targetDirPath, job);
-                job.lines.add("✓ Sync complete — " + targetDir);
+                job.log("✓ Sync complete — " + targetDir);
             } catch (IOException e) {
-                job.lines.add("Warning: some files could not be moved out of temp folders — " + e.getMessage());
+                job.log("Warning: some files could not be moved out of temp folders — " + e.getMessage());
             }
 
             // 4. Save URL to CSV + trigger MPD update
             savePlaylistEntry(title, job.url);
-            job.lines.add("Updating MPD library…");
+            job.log("Updating MPD library…");
             try (MPDClient mpd = new MPDClient(settings.get("mpd.host"), settings.getInt("mpd.port"))) {
                 mpd.command("update");
-                job.lines.add("✓ MPD library updated.");
+                job.log("✓ MPD library updated.");
             } catch (Exception e) {
-                job.lines.add("Warning: MPD update failed — " + e.getMessage());
+                job.log("Warning: MPD update failed — " + e.getMessage());
             }
 
         } catch (Exception e) {
-            job.lines.add("ERROR: " + e.getMessage()); job.ok = false;
+            job.log("ERROR: " + e.getMessage());
+            job.ok = false;
         } finally {
-            job.done = true;
+            job.finish();
         }
     }
 
-    private void extractIdFolders(Path targetDir, SyncJob job) throws IOException {
+    void extractIdFolders(Path targetDir, SyncJob job) throws IOException {
         try (DirectoryStream<Path> ds = Files.newDirectoryStream(targetDir)) {
             for (Path idFolder : ds) {
                 if (!Files.isDirectory(idFolder) || idFolder.getFileName().toString().length() != 11) continue;
@@ -278,7 +328,7 @@ public class SyncService {
                     }
                 }
                 try { Files.delete(idFolder); }
-                catch (IOException e) { job.lines.add("Warning: could not remove " + idFolder.getFileName()); }
+                catch (IOException e) { job.log("Warning: could not remove " + idFolder.getFileName()); }
             }
         }
     }

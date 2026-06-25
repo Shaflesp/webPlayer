@@ -32,14 +32,29 @@
             <artifactId>gson</artifactId>
             <version>2.11.0</version>
         </dependency>
+
+        <!-- Test infrastructure: JUnit 5, Mockito, AssertJ, MockMvc -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-test</artifactId>
+            <scope>test</scope>
+        </dependency>
     </dependencies>
 
     <build>
         <plugins>
+
+            <!-- ── Spring Boot fat JAR ────────────────────────────────────────── -->
             <plugin>
                 <groupId>org.springframework.boot</groupId>
                 <artifactId>spring-boot-maven-plugin</artifactId>
             </plugin>
+
+            <!-- ── Download yt-dlp binary at build time ──────────────────────── -->
+            <!--   Runs before compile so the binary lands in resources/native/   -->
+            <!--   and gets packed into the fat JAR automatically.                -->
+            <!--   The [ -f ... ] guard skips the download if already present,    -->
+            <!--   so incremental builds stay fast.                               -->
             <plugin>
                 <groupId>org.codehaus.mojo</groupId>
                 <artifactId>exec-maven-plugin</artifactId>
@@ -54,11 +69,11 @@
                             <arguments>
                                 <argument>-c</argument>
                                 <argument>
-                                    mkdir -p src/main/resources/native &amp;&amp;
+                                    mkdir -p src/main/resources/native;
                                     if [ ! -f src/main/resources/native/yt-dlp ]; then
-                                    echo "[webplayer] Downloading yt-dlp binary..." &amp;&amp;
-                                    curl -L --progress-bar -o src/main/resources/native/yt-dlp https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp &amp;&amp;
-                                    chmod +x src/main/resources/native/yt-dlp &amp;&amp;
+                                    echo "[webplayer] Downloading yt-dlp binary...";
+                                    curl -L --progress-bar -o src/main/resources/native/yt-dlp https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp;
+                                    chmod +x src/main/resources/native/yt-dlp;
                                     echo "[webplayer] yt-dlp downloaded.";
                                     else
                                     echo "[webplayer] yt-dlp already present, skipping download.";
@@ -68,6 +83,7 @@
                         </configuration>
                     </execution>
 
+                    <!-- ── Build React frontend before packaging ─────────────────── -->
                     <execution>
                         <id>build-frontend</id>
                         <phase>generate-resources</phase>
@@ -77,8 +93,8 @@
                             <arguments>
                                 <argument>-c</argument>
                                 <argument>
-                                    cd src/frontend &amp;&amp;
-                                    npm ci &amp;&amp;
+                                    cd src/frontend;
+                                    npm ci;
                                     npm run build
                                 </argument>
                             </arguments>
@@ -88,18 +104,24 @@
             </plugin>
 
         </plugins>
-        
+
+        <!-- ── Resources: include frontend dist + native binaries ────────── -->
         <resources>
             <resource>
                 <directory>src/main/resources</directory>
             </resource>
+            <!-- Vite build output → classpath:/static/ (Spring auto-serves it) -->
             <resource>
                 <directory>src/frontend/dist</directory>
                 <targetPath>static</targetPath>
             </resource>
         </resources>
     </build>
-    
+
+    <!-- ── Profile: bundle JRE with jpackage ─────────────────────────────── -->
+    <!--   Usage: mvn package -Pjpackage                                       -->
+    <!--   Requires JDK 14+ (jpackage is bundled with the JDK).               -->
+    <!--   Output: target/dist/WebPlayer/  (self-contained app image)         -->
     <profiles>
         <profile>
             <id>jpackage</id>
@@ -112,11 +134,13 @@
                         <executions>
                             <execution>
                                 <id>run-jpackage</id>
+                                <!-- Runs after the fat JAR is built -->
                                 <phase>verify</phase>
                                 <goals><goal>exec</goal></goals>
                                 <configuration>
                                     <executable>jpackage</executable>
                                     <arguments>
+                                        <!-- App image = self-contained directory, no installer needed -->
                                         <argument>--type</argument>
                                         <argument>app-image</argument>
 
@@ -126,6 +150,7 @@
                                         <argument>--app-version</argument>
                                         <argument>${project.version}</argument>
 
+                                        <!-- Where to find the fat JAR -->
                                         <argument>--input</argument>
                                         <argument>${project.build.directory}</argument>
 
@@ -135,12 +160,15 @@
                                         <argument>--main-class</argument>
                                         <argument>MPD.WebPlayerApplication</argument>
 
+                                        <!-- Output directory -->
                                         <argument>--dest</argument>
                                         <argument>${project.build.directory}/dist</argument>
 
+                                        <!-- JVM flags -->
                                         <argument>--java-options</argument>
                                         <argument>--enable-native-access=ALL-UNNAMED</argument>
 
+                                        <!-- Linux-specific -->
                                         <argument>--linux-app-category</argument>
                                         <argument>AudioVideo</argument>
                                     </arguments>

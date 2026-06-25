@@ -9,13 +9,13 @@ import java.util.*;
 /**
  * Reads/writes ~/.config/webplayer/config.properties.
  * Auto-reloads when the file changes on disk.
- * Injected wherever settings are needed via @Autowired / constructor injection.
+ * Injected wherever settings are needed via constructor injection.
  */
 @Service
 public class AppSettings {
 
-    private static final Path FILE = Path.of(
-        System.getProperty("user.home"), ".config", "webplayer", "config.properties"
+    private static final Path DEFAULT_FILE = Path.of(
+            System.getProperty("user.home"), ".config", "webplayer", "config.properties"
     );
 
     private static final Properties DEFAULTS = new Properties();
@@ -33,9 +33,23 @@ public class AppSettings {
         DEFAULTS.setProperty("fifo.path",           "/tmp/mpd.fifo");
         DEFAULTS.setProperty("yt.cookiesFile",      "");
     }
+    
+    private Path file = DEFAULT_FILE;
 
     private volatile Properties cache = new Properties();
     private volatile long fileMtime   = 0;
+
+    /**
+     * Test-only: returns an AppSettings instance pointing at an isolated file
+     * instead of the real ~/.config/webplayer/config.properties. Package-
+     * private so only tests in MPD.config can reach it — never used by
+     * production code or Spring's component scanning.
+     */
+    static AppSettings forTesting(Path file) {
+        AppSettings s = new AppSettings();
+        s.file = file;
+        return s;
+    }
 
     // ── Public API ────────────────────────────────────────────────────────────
 
@@ -71,8 +85,8 @@ public class AppSettings {
         for (var e : updates.entrySet())
             if (DEFAULTS.containsKey(e.getKey()))
                 toWrite.setProperty(e.getKey(), e.getValue().trim());
-        Files.createDirectories(FILE.getParent());
-        try (OutputStream os = Files.newOutputStream(FILE)) {
+        Files.createDirectories(file.getParent());
+        try (OutputStream os = Files.newOutputStream(file)) {
             toWrite.store(os, "WebPlayer config");
         }
         reload();
@@ -82,8 +96,8 @@ public class AppSettings {
 
     private void maybeReload() {
         try {
-            if (Files.exists(FILE)) {
-                long mtime = Files.getLastModifiedTime(FILE).toMillis();
+            if (Files.exists(file)) {
+                long mtime = Files.getLastModifiedTime(file).toMillis();
                 if (mtime != fileMtime) reload();
             }
         } catch (IOException ignored) {}
@@ -92,9 +106,9 @@ public class AppSettings {
     private synchronized void reload() {
         Properties p = new Properties();
         try {
-            if (Files.exists(FILE)) {
-                try (InputStream is = Files.newInputStream(FILE)) { p.load(is); }
-                fileMtime = Files.getLastModifiedTime(FILE).toMillis();
+            if (Files.exists(file)) {
+                try (InputStream is = Files.newInputStream(file)) { p.load(is); }
+                fileMtime = Files.getLastModifiedTime(file).toMillis();
             }
         } catch (IOException ignored) {}
         cache = p;

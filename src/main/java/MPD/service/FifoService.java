@@ -14,18 +14,18 @@ import java.util.concurrent.atomic.AtomicReference;
  * can stream them to SSE clients.
  * <p>
  * The reader runs on a single virtual thread started at application startup
- * (@PostConstruct).  Multiple SSE clients all read the same latest frame —
+ * (@PostConstruct). Multiple SSE clients all read the same latest frame —
  * no per-client I/O.
  */
 @Service
 public class FifoService {
 
     // ── DSP constants ─────────────────────────────────────────────────────────
-    private static final int FFT_SIZE    = 2048;
+    static final int FFT_SIZE    = 2048;
     private static final int FRAME_BYTES = 4;       // 16-bit stereo
     private static final int CHUNK_BYTES = FFT_SIZE * FRAME_BYTES;
-    private static final int OUT_BINS    = 64;
-    private static final int SAMPLE_RATE = 44100;
+    static final int OUT_BINS    = 64;
+    static final int SAMPLE_RATE = 44100;
 
     // ── Shared state ──────────────────────────────────────────────────────────
     private final AtomicReference<byte[]> latestBins =
@@ -79,7 +79,7 @@ public class FifoService {
 
     // ── DSP pipeline ─────────────────────────────────────────────────────────
 
-    private static byte[] process(byte[] pcm) {
+    static byte[] process(byte[] pcm) {
         double[] re = new double[FFT_SIZE];
         for (int i = 0; i < FFT_SIZE; i++) {
             int off = i * FRAME_BYTES;
@@ -125,7 +125,7 @@ public class FifoService {
         return out;
     }
 
-    private static void fft(double[] re, double[] im) {
+    static void fft(double[] re, double[] im) {
         int N = re.length;
         for (int i = 1, j = 0; i < N; i++) {
             int bit = N >> 1;
@@ -133,7 +133,7 @@ public class FifoService {
             j ^= bit;
             if (i < j) {
                 double t; t=re[i]; re[i]=re[j]; re[j]=t;
-                          t=im[i]; im[i]=im[j]; im[j]=t;
+                t=im[i]; im[i]=im[j]; im[j]=t;
             }
         }
         for (int len = 2; len <= N; len <<= 1) {
