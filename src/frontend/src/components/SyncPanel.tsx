@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { useStore } from '../store';
-import { addUri } from '../api';
+import { addUri, fetchDependencyStatus, updateYtDlp } from '../api';
 
 // ── API types ─────────────────────────────────────────────────────────────────
 
@@ -36,15 +36,37 @@ export function SyncPanel() {
   const [progress,  setProgress]  = useState<{ n: number; total: number } | null>(null);
   const [doneState, setDoneState] = useState<'ok' | 'error' | null>(null);
   const [playlists, setPlaylists] = useState<PlaylistEntry[]>([]);
+  const [ytdlpVersion, setYtdlpVersion] = useState<string | null>(null);
+  const [updating,      setUpdating]    = useState(false);
+  const [updateMsg,     setUpdateMsg]   = useState<string | null>(null);
 
   const logRef  = useRef<HTMLDivElement>(null);
   const esRef   = useRef<EventSource | null>(null);
 
-  // Load playlist list when panel opens
+  // Load playlist list + yt-dlp version when panel opens
   useEffect(() => {
     if (!open) return;
     apiFetchPlaylists().then(setPlaylists).catch(() => {});
+    fetchDependencyStatus().then(s => setYtdlpVersion(s.ytdlp.version)).catch(() => {});
   }, [open]);
+
+  const handleUpdateYtDlp = useCallback(async () => {
+    setUpdating(true);
+    setUpdateMsg(null);
+    try {
+      const res = await updateYtDlp();
+      setYtdlpVersion(res.version);
+      setUpdateMsg(
+          res.output.some(l => l.toLowerCase().includes('up to date'))
+              ? 'Already up to date.'
+              : 'Updated successfully.'
+      );
+    } catch {
+      setUpdateMsg('Update check failed — see server logs.');
+    } finally {
+      setUpdating(false);
+    }
+  }, []);
 
   // Auto-scroll log
   useEffect(() => {
@@ -125,6 +147,35 @@ export function SyncPanel() {
           </div>
 
           <div className="settings-body">
+
+            {/* ── yt-dlp version / self-update ── */}
+            <div className="settings-section">
+              <h3>yt-dlp</h3>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+              <span style={{ fontSize: 12, color: 'var(--text-sub)', flex: 1 }}>
+                {ytdlpVersion ? `Version ${ytdlpVersion}` : 'Checking version…'}
+              </span>
+                <button
+                    className="btn-secondary"
+                    onClick={handleUpdateYtDlp}
+                    disabled={updating}
+                    style={{ opacity: updating ? .6 : 1, padding: '6px 12px' }}
+                >
+                  {updating
+                      ? <><i className="fas fa-spinner fa-spin" /> Checking…</>
+                      : <><i className="fas fa-arrows-rotate" /> Check for update</>}
+                </button>
+              </div>
+              {updateMsg && (
+                  <div style={{ marginTop: 8, fontSize: 12, color: 'var(--text-sub)' }}>{updateMsg}</div>
+              )}
+              <div style={{ marginTop: 8, fontSize: 11, color: 'var(--text-dim)' }}>
+                YouTube changes how it serves video data fairly often, and that's
+                the most common cause of random "403 Forbidden" errors on a few
+                videos in an otherwise-fine playlist. Updating here often fixes it
+                without needing to rebuild the whole app.
+              </div>
+            </div>
 
             {/* ── URL input ── */}
             <div className="settings-section">

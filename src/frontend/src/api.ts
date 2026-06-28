@@ -102,6 +102,13 @@ export const testConnection = (host: string, port: string) =>
 export const fetchDependencyStatus = (): Promise<DependencyStatus> =>
     fetch('/StatusServlet').then(r => r.json());
 
+export const updateYtDlp = (): Promise<{ ok: boolean; output: string[]; version: string }> =>
+    fetch('/StatusServlet', {
+        method:  'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body:    JSON.stringify({ action: 'updateYtDlp' }),
+    }).then(r => r.json());
+
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
 export const artUrl = (file: string) =>

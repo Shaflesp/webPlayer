@@ -40,7 +40,7 @@ export interface MPDItem {
 }
 
 export interface DependencyStatus {
-  ytdlp:  { ok: boolean; path: string; note: string };
+  ytdlp:  { ok: boolean; path: string; note: string; version: string };
   mpd:    { ok: boolean };
   ffmpeg: { ok: boolean };
 }

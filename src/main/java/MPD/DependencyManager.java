@@ -27,7 +27,7 @@ public class DependencyManager {
     private static final Logger log = LoggerFactory.getLogger(DependencyManager.class);
 
     private static final Path APP_DIR  =
-        Path.of(System.getProperty("user.home"), ".local", "share", "webplayer");
+            Path.of(System.getProperty("user.home"), ".local", "share", "webplayer");
     private static final Path BIN_DIR  = APP_DIR.resolve("bin");
     private static final Path YT_DLP   = BIN_DIR.resolve("yt-dlp");
 
@@ -59,11 +59,56 @@ public class DependencyManager {
 
     /** Map suitable for JSON serialisation (used by ConfigController /status). */
     public Map<String, Object> statusMap() {
+        String version = getYtDlpVersion();
         return Map.of(
-            "ytdlp",  Map.of("ok", ytDlpReady,  "path", ytDlpExecutable, "note", ytDlpNote),
-            "mpd",    Map.of("ok", mpdReady),
-            "ffmpeg", Map.of("ok", ffmpegReady)
+                "ytdlp",  Map.of("ok", ytDlpReady,  "path", ytDlpExecutable, "note", ytDlpNote,
+                        "version", version != null ? version : "unknown"),
+                "mpd",    Map.of("ok", mpdReady),
+                "ffmpeg", Map.of("ok", ffmpegReady)
         );
+    }
+    
+    public synchronized List<String> updateYtDlp() {
+        List<String> output = new ArrayList<>();
+        if (!ytDlpReady) {
+            output.add("yt-dlp is not available — nothing to update.");
+            return output;
+        }
+        try {
+            Process p = new ProcessBuilder(ytDlpExecutable, "-U")
+                    .redirectErrorStream(true).start();
+            try (BufferedReader r = new BufferedReader(new InputStreamReader(p.getInputStream()))) {
+                String line;
+                while ((line = r.readLine()) != null) output.add(line);
+            }
+            p.waitFor();
+            ytDlpNote = "checked for updates " + java.time.LocalDate.now();
+            log.info("yt-dlp update check completed");
+        } catch (IOException e) {
+            output.add("Update failed: " + e.getMessage());
+            log.warn("yt-dlp self-update failed: {}", e.getMessage());
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            output.add("Update was interrupted.");
+        }
+        return output;
+    }
+
+    /** Current yt-dlp version string (e.g. "2026.06.15"), or null if unavailable. */
+    public String getYtDlpVersion() {
+        if (!ytDlpReady) return null;
+        try {
+            Process p = new ProcessBuilder(ytDlpExecutable, "--version")
+                    .redirectErrorStream(true).start();
+            String version;
+            try (BufferedReader r = new BufferedReader(new InputStreamReader(p.getInputStream()))) {
+                version = r.readLine();
+            }
+            p.waitFor();
+            return version;
+        } catch (Exception e) {
+            return null;
+        }
     }
 
     // ── yt-dlp extraction ─────────────────────────────────────────────────────
@@ -134,9 +179,9 @@ public class DependencyManager {
     private static boolean probe(String... cmd) {
         try {
             return new ProcessBuilder(cmd)
-                .redirectErrorStream(true)
-                .start()
-                .waitFor() == 0;
+                    .redirectErrorStream(true)
+                    .start()
+                    .waitFor() == 0;
         } catch (Exception e) {
             return false;
         }

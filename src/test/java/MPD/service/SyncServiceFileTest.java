@@ -96,7 +96,7 @@ class SyncServiceFileTest {
         newService().extractIdFolders(tempDir, dummyJob());
 
         assertTrue(Files.exists(tempDir.resolve("Dup\u3164\u3164.opus")),
-            "should keep appending the invisible char until the name is actually unique");
+                "should keep appending the invisible char until the name is actually unique");
     }
 
     @Test
@@ -145,6 +145,82 @@ class SyncServiceFileTest {
         assertTrue(Files.exists(deduped), "extension should still be .mp3 after the invisible-char insert, not lost or misplaced");
     }
 
+    // ── Leftover artifacts from interrupted downloads (e.g. a mid-stream 403) ─
+
+    @Test
+    void extractIdFolders_deletesLeftoverThumbnailRatherThanMovingIt() throws IOException {
+        Path idFolder = tempDir.resolve("ggggggggggg");
+        Files.createDirectories(idFolder);
+        Files.writeString(idFolder.resolve("Failed Song.webp"), "thumbnail bytes");
+
+        newService().extractIdFolders(tempDir, dummyJob());
+
+        assertFalse(Files.exists(tempDir.resolve("Failed Song.webp")),
+                "thumbnail leftover should never be promoted into the music library");
+        assertFalse(Files.exists(idFolder), "ID folder should still be cleaned up even though it only had a leftover");
+    }
+
+    @Test
+    void extractIdFolders_deletesPartialDownloadFile() throws IOException {
+        Path idFolder = tempDir.resolve("hhhhhhhhhhh");
+        Files.createDirectories(idFolder);
+        // yt-dlp's convention: the FULL intended filename plus a ".part" suffix
+        // while a download is still in progress.
+        Files.writeString(idFolder.resolve("Interrupted Song.opus.part"), "incomplete bytes");
+
+        newService().extractIdFolders(tempDir, dummyJob());
+
+        assertFalse(Files.exists(tempDir.resolve("Interrupted Song.opus.part")));
+        assertFalse(Files.exists(tempDir.resolve("Interrupted Song.opus")),
+                "a .part file must never be mistaken for a completed .opus file");
+    }
+
+    @Test
+    void extractIdFolders_keepsCompletedAudioButDeletesArtifactsInTheSameFolder() throws IOException {
+        // A realistic mixed case: one video's folder has BOTH a leftover
+        // thumbnail AND its successfully completed audio file.
+        Path idFolder = tempDir.resolve("iiiiiiiiiii");
+        Files.createDirectories(idFolder);
+        Files.writeString(idFolder.resolve("Good Song.opus"), "complete audio");
+        Files.writeString(idFolder.resolve("Good Song.webp"), "leftover thumbnail");
+
+        newService().extractIdFolders(tempDir, dummyJob());
+
+        assertTrue(Files.exists(tempDir.resolve("Good Song.opus")), "the real, completed track should still be moved");
+        assertFalse(Files.exists(tempDir.resolve("Good Song.webp")), "the leftover thumbnail should not be");
+    }
+
+    @Test
+    void extractIdFolders_logsHowManyArtifactsWereCleanedUp() throws IOException {
+        Path idFolder = tempDir.resolve("jjjjjjjjjjj");
+        Files.createDirectories(idFolder);
+        Files.writeString(idFolder.resolve("a.webp"), "x");
+        Files.writeString(idFolder.resolve("b.part"), "x");
+
+        SyncService.SyncJob job = dummyJob();
+        newService().extractIdFolders(tempDir, job);
+
+        boolean foundSummary = false;
+        for (int i = 0; i < job.lineCount(); i++) {
+            if (job.lineAt(i).contains("Cleaned up 2 leftover file")) foundSummary = true;
+        }
+        assertTrue(foundSummary, "expected a summary log line mentioning the 2 cleaned-up artifacts");
+    }
+
+    @Test
+    void extractIdFolders_logsNothingWhenThereWereNoArtifacts() throws IOException {
+        Path idFolder = tempDir.resolve("kkkkkkkkkkk");
+        Files.createDirectories(idFolder);
+        Files.writeString(idFolder.resolve("Clean Song.opus"), "complete");
+
+        SyncService.SyncJob job = dummyJob();
+        newService().extractIdFolders(tempDir, job);
+
+        for (int i = 0; i < job.lineCount(); i++) {
+            assertFalse(job.lineAt(i).contains("Cleaned up"), "should not log a cleanup summary when nothing needed cleaning");
+        }
+    }
+
     // ── CSV read/write ────────────────────────────────────────────────────────
 
     @Test
@@ -169,7 +245,7 @@ class SyncServiceFileTest {
     @Test
     void readCsv_skipsCommentAndBlankLines() throws IOException {
         Files.writeString(tempDir.resolve("webplayer-playlists.csv"),
-            "# this is a header comment\n\nReal Entry,https://example.com,2026-01-01 00:00:00\n");
+                "# this is a header comment\n\nReal Entry,https://example.com,2026-01-01 00:00:00\n");
 
         Map<String, String[]> result = newService().readCsv(tempDir);
 
@@ -183,7 +259,7 @@ class SyncServiceFileTest {
         // the FIRST TWO commas so the URL field can safely contain its own.
         String url = "https://youtube.com/watch?v=abc,123,456";
         Files.writeString(tempDir.resolve("webplayer-playlists.csv"),
-            "Name," + url + ",2026-01-01 00:00:00\n");
+                "Name," + url + ",2026-01-01 00:00:00\n");
 
         Map<String, String[]> result = newService().readCsv(tempDir);
 
@@ -194,14 +270,49 @@ class SyncServiceFileTest {
     void writeCsv_overwritesPreviousContentEntirely() {
         SyncService service = newService();
         service.writeCsv(tempDir, new LinkedHashMap<>(Map.of(
-            "Old", new String[]{ "url1", "ts1" }
+                "Old", new String[]{ "url1", "ts1" }
         )));
         service.writeCsv(tempDir, new LinkedHashMap<>(Map.of(
-            "New", new String[]{ "url2", "ts2" }
+                "New", new String[]{ "url2", "ts2" }
         )));
 
         Map<String, String[]> result = service.readCsv(tempDir);
         assertFalse(result.containsKey("Old"), "writeCsv should replace the file, not append to it");
         assertTrue(result.containsKey("New"));
+    }
+
+    // ── listSyncedPlaylists() track counting ─────────────────────────────────
+
+    @Test
+    void listSyncedPlaylists_doesNotCountBookkeepingFilesAsTracks() throws IOException {
+        AppSettings settings = AppSettings.forTesting(tempDir.resolve("config.properties"));
+        settings.saveAll(Map.of("music.dir", tempDir.toString()));
+        SyncService service = new SyncService(settings, new DependencyManager());
+
+        Path playlistDir = tempDir.resolve("My Playlist");
+        Files.createDirectories(playlistDir);
+        Files.writeString(playlistDir.resolve("archive.txt"), "youtube abc12345678\n");
+        Files.writeString(playlistDir.resolve("webplayer-retries.properties"), "someId=1\n");
+        Files.writeString(playlistDir.resolve("Song One.opus"), "audio");
+        Files.writeString(playlistDir.resolve("Song Two.mp3"),  "audio");
+
+        List<SyncService.PlaylistEntry> result = service.listSyncedPlaylists();
+
+        assertEquals(1, result.size());
+        assertEquals(2, result.getFirst().tracks(),
+                "should count only the 2 real audio files — archive.txt and the retries file must not be counted");
+    }
+
+    @Test
+    void listSyncedPlaylists_ignoresDirectoriesWithoutAnArchiveFile() throws IOException {
+        // A directory with no archive.txt isn't a synced playlist at all
+        // (e.g. some unrelated folder the user keeps in their music dir).
+        AppSettings settings = AppSettings.forTesting(tempDir.resolve("config.properties"));
+        settings.saveAll(Map.of("music.dir", tempDir.toString()));
+        SyncService service = new SyncService(settings, new DependencyManager());
+
+        Files.createDirectories(tempDir.resolve("Not A Synced Playlist"));
+
+        assertTrue(service.listSyncedPlaylists().isEmpty());
     }
 }

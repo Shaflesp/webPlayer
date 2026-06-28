@@ -45,7 +45,7 @@ public class AppSettings {
      * private so only tests in MPD.config can reach it — never used by
      * production code or Spring's component scanning.
      */
-    static AppSettings forTesting(Path file) {
+    public static AppSettings forTesting(Path file) {
         AppSettings s = new AppSettings();
         s.file = file;
         return s;

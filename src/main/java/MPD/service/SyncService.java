@@ -126,7 +126,7 @@ public class SyncService {
                 long tracks;
                 try (var s = Files.list(dir)) {
                     tracks = s.filter(p -> !Files.isDirectory(p))
-                            .filter(p -> !p.getFileName().toString().equals("archive.txt"))
+                            .filter(SyncService::hasAudioExtension)
                             .count();
                 }
                 String[] meta = csv.getOrDefault(name, new String[]{"", ""});
@@ -135,6 +135,12 @@ public class SyncService {
         } catch (IOException ignored) {}
         result.sort(Comparator.comparing(e -> e.name));
         return result;
+    }
+
+    private static boolean hasAudioExtension(Path p) {
+        String fn  = p.getFileName().toString().toLowerCase();
+        int    dot = fn.lastIndexOf('.');
+        return dot >= 0 && AUDIO_EXTENSIONS.contains(fn.substring(dot));
     }
 
     private synchronized void savePlaylistEntry(String name, String url) {
@@ -162,7 +168,7 @@ public class SyncService {
                     map.put(n, new String[]{ line.substring(firstComma + 1).trim(), "" });
                     continue;
                 }
-
+                
                 String u = line.substring(firstComma + 1, lastComma).trim();
                 String t = line.substring(lastComma + 1).trim();
                 map.put(n, new String[]{ u, t });
@@ -262,6 +268,10 @@ public class SyncService {
                     "-x",  "--audio-format", "best",
                     "--embed-thumbnail", "--add-metadata",
                     "--download-archive", archiveFile,
+                    "--retries", "10",
+                    "--fragment-retries", "10",
+                    "--sleep-interval", "1",
+                    "--max-sleep-interval", "3",
                     "-o",  targetDir + "/%(id)s/%(title).230B.%(ext)s"
             ));
             if (browser != null) dlArgs.addAll(List.of("--cookies-from-browser", browser));
@@ -274,6 +284,7 @@ public class SyncService {
             }
             int exit = proc.waitFor();
             boolean producedOutput = job.lineCount() > linesBefore;
+            
             job.ok = (exit == 0) || producedOutput;
 
             if (!job.ok) {
@@ -294,7 +305,16 @@ public class SyncService {
                 job.log("Warning: some files could not be moved out of temp folders — " + e.getMessage());
             }
 
-            // 4. Save URL to CSV + trigger MPD update
+            // 4. Limit retries for chronically-failing videos so a permanently
+            //    broken video (deleted/private/region-locked) doesn't get
+            //    re-attempted on every single future resync forever.
+            try {
+                limitRetriesForFailingVideos(job, targetDir, archiveFile, browser, ytdlp);
+            } catch (Exception e) {
+                job.log("Warning: retry-limit check failed — " + e.getMessage());
+            }
+
+            // 5. Save URL to CSV + trigger MPD update
             savePlaylistEntry(title, job.url);
             job.log("Updating MPD library…");
             try (MPDClient mpd = new MPDClient(settings.get("mpd.host"), settings.getInt("mpd.port"))) {
@@ -312,7 +332,116 @@ public class SyncService {
         }
     }
 
+    private static final int MAX_RETRY_ATTEMPTS = 3;
+
+    /**
+     * Compares the playlist's full video-ID list against what's actually in
+     * the archive after this run. Any ID still missing gets its failure
+     * count bumped in a small per-playlist tracking file; once an ID crosses
+     * MAX_RETRY_ATTEMPTS (counted across SEPARATE sync runs, not within one —
+     * yt-dlp's own --retries already handles in-run retries), it's injected
+     * directly into archive.txt using the exact format yt-dlp itself writes
+     * there, so yt-dlp's OWN skip mechanism quietly ignores it from then on.
+     * An ID that succeeds after some prior failures has its tracked count
+     * cleared — the failure was transient, not permanent.
+     */
+    private void limitRetriesForFailingVideos(SyncJob job, String targetDir, String archiveFile,
+                                              String browser, String ytdlp) throws IOException, InterruptedException {
+        List<String> idArgs = new ArrayList<>(List.of(
+                ytdlp, "--no-warnings", "--flat-playlist", "--print", "%(id)s"
+        ));
+        if (browser != null) idArgs.addAll(List.of("--cookies-from-browser", browser));
+        idArgs.add(job.url);
+        List<String> allIds = exec(idArgs).stream().filter(l -> !l.isBlank()).map(String::trim).toList();
+
+        Path archivePath = Path.of(archiveFile);
+        Path targetPath  = Path.of(targetDir);
+        Set<String> succeededIds       = readArchivedIds(archivePath);
+        Map<String, Integer> retryCounts = readRetryCounts(targetPath);
+
+        int givenUpCount = 0;
+        for (String id : allIds) {
+            if (succeededIds.contains(id)) {
+                retryCounts.remove(id); // succeeded — clear any prior failure history
+                continue;
+            }
+            int attempts = retryCounts.getOrDefault(id, 0) + 1;
+            if (attempts >= MAX_RETRY_ATTEMPTS) {
+                appendToArchive(archivePath, id);
+                retryCounts.remove(id);
+                givenUpCount++;
+                job.log("Giving up on video " + id + " after " + attempts
+                        + " failed attempts across separate syncs (likely unavailable/private/deleted).");
+            } else {
+                retryCounts.put(id, attempts);
+            }
+        }
+        writeRetryCounts(targetPath, retryCounts);
+
+        if (givenUpCount > 0) {
+            job.log(givenUpCount + " video(s) marked as permanently unavailable — they won't be retried again. "
+                    + "Remove their line from archive.txt manually if you want to retry one anyway.");
+        }
+    }
+
+    private Map<String, Integer> readRetryCounts(Path targetDir) {
+        Path file = targetDir.resolve("webplayer-retries.properties");
+        Map<String, Integer> counts = new HashMap<>();
+        if (!Files.exists(file)) return counts;
+        Properties p = new Properties();
+        try (InputStream is = Files.newInputStream(file)) { p.load(is); } catch (IOException ignored) { return counts; }
+        for (String key : p.stringPropertyNames()) {
+            try { counts.put(key, Integer.parseInt(p.getProperty(key))); } catch (NumberFormatException ignored) {}
+        }
+        return counts;
+    }
+
+    private void writeRetryCounts(Path targetDir, Map<String, Integer> counts) {
+        Path file = targetDir.resolve("webplayer-retries.properties");
+        Properties p = new Properties();
+        for (var e : counts.entrySet()) p.setProperty(e.getKey(), String.valueOf(e.getValue()));
+        try (OutputStream os = Files.newOutputStream(file)) {
+            p.store(os, "WebPlayer per-video retry tracking — safe to delete to reset, or edit to retry a given-up video");
+        } catch (IOException ignored) {}
+    }
+
+    /** Reads which video IDs are already recorded as successfully downloaded, per yt-dlp's own archive format. */
+    private Set<String> readArchivedIds(Path archiveFile) {
+        Set<String> ids = new HashSet<>();
+        if (!Files.exists(archiveFile)) return ids;
+        try (BufferedReader r = Files.newBufferedReader(archiveFile)) {
+            String line;
+            while ((line = r.readLine()) != null) {
+                int sp = line.lastIndexOf(' '); // format: "youtube VIDEO_ID"
+                if (sp >= 0) ids.add(line.substring(sp + 1).trim());
+            }
+        } catch (IOException ignored) {}
+        return ids;
+    }
+
+    /** Appends a video ID to the archive using yt-dlp's own format, so yt-dlp's own skip logic picks it up unmodified. */
+    private void appendToArchive(Path archiveFile, String videoId) {
+        try (BufferedWriter w = Files.newBufferedWriter(archiveFile,
+                StandardOpenOption.CREATE, StandardOpenOption.APPEND)) {
+            w.write("youtube " + videoId);
+            w.newLine();
+        } catch (IOException ignored) {}
+    }
+
+    /**
+     * Extensions a COMPLETED yt-dlp+ffmpeg pipeline can legitimately produce.
+     * Anything else found in an %(id)s/ folder — a .webp/.jpg thumbnail that
+     * should have been embedded-then-deleted, a .part file from an
+     * interrupted download, a .ytdl resume-state sidecar, etc. — is
+     * necessarily a leftover from a video whose download/conversion never
+     * finished (e.g. a mid-stream 403), not a real track.
+     */
+    private static final Set<String> AUDIO_EXTENSIONS = Set.of(
+            ".opus", ".mp3", ".m4a", ".aac", ".flac", ".ogg", ".oga", ".wav", ".wma"
+    );
+
     void extractIdFolders(Path targetDir, SyncJob job) throws IOException {
+        int artifactsRemoved = 0;
         try (DirectoryStream<Path> ds = Files.newDirectoryStream(targetDir)) {
             for (Path idFolder : ds) {
                 if (!Files.isDirectory(idFolder) || idFolder.getFileName().toString().length() != 11) continue;
@@ -321,7 +450,14 @@ public class SyncService {
                         String fn = src.getFileName().toString();
                         int dot = fn.lastIndexOf('.');
                         StringBuilder base = new StringBuilder(dot >= 0 ? fn.substring(0, dot) : fn);
-                        String ext  = dot >= 0 ? fn.substring(dot) : "";
+                        String ext  = dot >= 0 ? fn.substring(dot).toLowerCase() : "";
+
+                        if (!AUDIO_EXTENSIONS.contains(ext)) {
+                            try { Files.delete(src); artifactsRemoved++; }
+                            catch (IOException e) { job.log("Warning: could not remove leftover artifact " + fn); }
+                            continue;
+                        }
+
                         Path dest = targetDir.resolve(base + ext);
                         while (Files.exists(dest)) { base.append(INVISIBLE); dest = targetDir.resolve(base + ext); }
                         Files.move(src, dest);
@@ -330,6 +466,10 @@ public class SyncService {
                 try { Files.delete(idFolder); }
                 catch (IOException e) { job.log("Warning: could not remove " + idFolder.getFileName()); }
             }
+        }
+        if (artifactsRemoved > 0) {
+            job.log("Cleaned up " + artifactsRemoved + " leftover file(s) from incomplete downloads "
+                    + "(thumbnails/partial files from videos that failed mid-download — resync to retry them).");
         }
     }
 
