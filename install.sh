@@ -235,7 +235,7 @@ pid_file            "~/.config/mpd/pid"
 state_file          "~/.config/mpd/state"
 sticker_file        "~/.config/mpd/sticker.sql"
 
-bind_to_address     "localhost"
+bind_to_address     "0.0.0.0"
 port                "6600"
 
 auto_update         "yes"
