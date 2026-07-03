@@ -38,7 +38,7 @@ if [[ "$MODE" != "jar" ]]; then need jpackage; fi
 
 echo ""
 echo "▶ Building React frontend…"
-( cd src/frontend && npm install --prefer-offline && npm run build )
+( cd src/frontend && npm ci && npm run build )
 echo "  ✓ Frontend built → src/frontend/dist/"
 
 # ── 3. yt-dlp binary (cached after first run) ────────────────────────────────
