@@ -213,14 +213,14 @@ export function Settings() {
               </div>
             </div>
             <div className="settings-field">
-              <label>FIFO path <span style={{ color: 'var(--text-dim)', fontSize: 10 }}>(same source as ncmpcpp)</span></label>
+              <label>FIFO path </label>
               <input type="text" value={fifoPath}
                      onChange={e => setFifoPath(e.target.value)}
                      onBlur={e  => persist({ 'fifo.path': e.target.value })}
                      placeholder="/tmp/mpd.fifo" />
             </div>
             <div className="settings-field">
-              <label>Stream URL <span style={{ color: 'var(--text-dim)', fontSize: 10 }}>(Web Audio fallback)</span></label>
+              <label>Stream URL</label>
               <input type="text" value={streamUrl}
                      onChange={e => setStreamUrl(e.target.value)}
                      onBlur={e  => persist({ 'stream.url': e.target.value })}

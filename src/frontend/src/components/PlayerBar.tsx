@@ -114,12 +114,39 @@ export function PlayerBar() {
 
   const audioRef       = useRef<HTMLAudioElement | null>(null);
   const [localPlaying, setLocalPlaying] = useState(false);
+  const [localError,   setLocalError]   = useState<string | null>(null);
+  
+  const isSameDevice = (() => {
+    if (!streamUrl) return false;
+    try {
+      const url = new URL(/^https?:\/\//i.test(streamUrl) ? streamUrl : 'http://' + streamUrl);
+      return url.hostname === 'localhost'
+          || url.hostname === '127.0.0.1';
+    } catch { return false; }
+  })();
 
-  // ── Local audio toggle ──────────────────────────────────────────────────────
-  // Creates a plain <audio> element (outside React's tree) that connects to
-  // MPD's HTTP stream output and plays it through this browser's own speakers.
-  // This is how a remote PC hears audio without any installation — just the
-  // browser, pointed at this URL.
+  // ── Sync <audio> with MPD status ─────────────────────────────────────────
+  // The browser's <audio> element buffers several seconds of audio ahead —
+  // when MPD pauses or stops, the stream stops encoding but the browser
+  // keeps playing from its buffer, causing ~5 seconds of extra audio after
+  // every pause. Mirroring MPD's state onto the audio element immediately
+  // eliminates that lag entirely: the browser stops/resumes at the same
+  // instant as MPD, independent of how much it had buffered.
+  // On resume we reload the src so the browser re-joins the live stream
+  // rather than trying to unpause a now-stale buffer position.
+  useEffect(() => {
+    if (!audioRef.current || !localPlaying) return;
+    if (status.state === 'play') {
+      if (audioRef.current.paused) {
+        const url = audioRef.current.src;
+        audioRef.current.src = '';
+        audioRef.current.src = url;
+        audioRef.current.play().catch(() => {});
+      }
+    } else {
+      audioRef.current.pause();
+    }
+  }, [status.state, localPlaying]);
 
   const toggleLocalAudio = useCallback(() => {
     if (!streamUrl) return;
@@ -131,15 +158,31 @@ export function PlayerBar() {
         audioRef.current     = null;
       }
       setLocalPlaying(false);
+      setLocalError(null);
     } else {
-      const audio  = new Audio(streamUrl);
-      audio.volume = 1.0;   // MPD's own volume slider controls the source level
-      audio.play().catch(() => {
-        // Autoplay was blocked or stream unreachable — fail silently,
-        // the button just won't activate.
+      const url = /^https?:\/\//i.test(streamUrl)
+          ? streamUrl
+          : 'http://' + streamUrl;
+
+      const audio  = new Audio(url);
+      audio.volume = 1.0;
+      setLocalError(null);
+
+      audio.onerror = () => {
+        setLocalError('Stream unreachable — check the URL in Settings and that MPD is running');
+        audioRef.current = null;
+        setLocalPlaying(false);
+      };
+
+      audio.play().catch(err => {
+        // Ignore AbortErrors caused by our useEffect clearing the src to flush the buffer
+        if (err.name === 'AbortError') return;
+        
+        setLocalError('Could not start audio: ' + (err?.message ?? 'unknown error'));
         audioRef.current = null;
         setLocalPlaying(false);
       });
+
       audioRef.current = audio;
       setLocalPlaying(true);
     }
@@ -160,13 +203,23 @@ export function PlayerBar() {
   }, [status.state]);
 
   const playIcon = status.state === 'play' ? 'fa-pause' : 'fa-play';
-  const headphonesTooltip = streamUrl
-      ? (localPlaying ? 'Stop playing on this device' : 'Play audio on this device')
-      : 'Set a Stream URL in Settings to enable this';
+  const headphonesTooltip = isSameDevice
+      ? 'Already playing on this device — headphones mode is for remote listeners'
+      : streamUrl
+          ? (localPlaying ? 'Stop playing on this device' : 'Play audio on this device')
+          : 'Set a Stream URL in Settings to enable this';
 
   return (
       <div className="player-bar">
         <SeekBar />
+
+        {localError && (
+            <div style={{ fontSize: 11, color: '#f87171', textAlign: 'center',
+              marginBottom: 2, padding: '0 16px' }}>
+              <i className="fas fa-triangle-exclamation" style={{ marginRight: 5 }} />
+              {localError}
+            </div>
+        )}
 
         <div className="ctrl-row">
           {/* Left: mode toggles + local audio */}
@@ -195,7 +248,8 @@ export function PlayerBar() {
               <button
                   className={`ctrl-btn toggle-btn${localPlaying ? ' active' : ''}`}
                   onClick={toggleLocalAudio}
-                  style={{ opacity: streamUrl ? 1 : 0.35 }}
+                  style={{ opacity: (streamUrl && !isSameDevice) ? 1 : 0.35 }}
+                  disabled={isSameDevice}
               >
                 <i className="fas fa-headphones" />
               </button>

@@ -45,16 +45,13 @@ export function App() {
   }, []);
 
   // ── Check dependency health once on startup ────────────────────────────────
-  // Surfaces missing mpd/ffmpeg/yt-dlp the same way a connection problem is
-  // surfaced, instead of silently failing later (e.g. a sync erroring out
-  // with no obvious cause because ffmpeg was never installed).
+
   useEffect(() => {
     fetchDependencyStatus()
         .then(s => setDepWarning(buildDepWarning(s)))
         .catch(() => { /* status endpoint not reachable — not critical, skip */ });
   }, []);
 
-  // Start polling (queue smart-updates are baked in)
   usePoller();
 
   // ── Sync CSS custom properties when settings change ───────────────────────
