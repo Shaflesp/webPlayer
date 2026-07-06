@@ -63,10 +63,10 @@ function SeekBar() {
 // ── Volume ────────────────────────────────────────────────────────────────────
 
 function Volume() {
-  const vol             = useStore(s => s.status.volume);
-  const [dragging, setDragging]   = useState(false);
-  const [localVol, setLocalVol]   = useState(100);
-  const [prevVol,  setPrevVol]    = useState(75);
+  const vol = useStore(s => s.status.volume);
+  const [dragging, setDragging] = useState(false);
+  const [localVol, setLocalVol] = useState(100);
+  const [prevVol,  setPrevVol]  = useState(75);
 
   useEffect(() => { if (!dragging) setLocalVol(vol); }, [vol, dragging]);
 
@@ -112,35 +112,31 @@ export function PlayerBar() {
   const status    = useStore(s => s.status);
   const streamUrl = useStore(s => s.settings['stream.url'] ?? '');
 
-  const audioRef       = useRef<HTMLAudioElement | null>(null);
+  const audioRef        = useRef<HTMLAudioElement | null>(null);
   const [localPlaying, setLocalPlaying] = useState(false);
   const [localError,   setLocalError]   = useState<string | null>(null);
   
+  const reconnectingRef = useRef(false);
+
   const isSameDevice = (() => {
     if (!streamUrl) return false;
     try {
-      const url = new URL(/^https?:\/\//i.test(streamUrl) ? streamUrl : 'http://' + streamUrl);
-      return url.hostname === 'localhost'
-          || url.hostname === '127.0.0.1';
+      const u = new URL(/^https?:\/\//i.test(streamUrl)
+          ? streamUrl : 'http://' + streamUrl);
+      return u.hostname === 'localhost' || u.hostname === '127.0.0.1';
     } catch { return false; }
   })();
 
-  // ── Sync <audio> with MPD status ─────────────────────────────────────────
-  // The browser's <audio> element buffers several seconds of audio ahead —
-  // when MPD pauses or stops, the stream stops encoding but the browser
-  // keeps playing from its buffer, causing ~5 seconds of extra audio after
-  // every pause. Mirroring MPD's state onto the audio element immediately
-  // eliminates that lag entirely: the browser stops/resumes at the same
-  // instant as MPD, independent of how much it had buffered.
-  // On resume we reload the src so the browser re-joins the live stream
-  // rather than trying to unpause a now-stale buffer position.
+  // ── Sync <audio> with MPD state ───────────────────────────────────────────
   useEffect(() => {
     if (!audioRef.current || !localPlaying) return;
     if (status.state === 'play') {
       if (audioRef.current.paused) {
+        reconnectingRef.current = true;
         const url = audioRef.current.src;
         audioRef.current.src = '';
         audioRef.current.src = url;
+        reconnectingRef.current = false;
         audioRef.current.play().catch(() => {});
       }
     } else {
@@ -148,8 +144,9 @@ export function PlayerBar() {
     }
   }, [status.state, localPlaying]);
 
+  // ── Toggle local audio ────────────────────────────────────────────────────
   const toggleLocalAudio = useCallback(() => {
-    if (!streamUrl) return;
+    if (!streamUrl || isSameDevice) return;
 
     if (localPlaying) {
       if (audioRef.current) {
@@ -161,23 +158,21 @@ export function PlayerBar() {
       setLocalError(null);
     } else {
       const url = /^https?:\/\//i.test(streamUrl)
-          ? streamUrl
-          : 'http://' + streamUrl;
+          ? streamUrl : 'http://' + streamUrl;
 
-      const audio  = new Audio(url);
+      const audio = new Audio(url);
       audio.volume = 1.0;
       setLocalError(null);
 
       audio.onerror = () => {
+        if (reconnectingRef.current) return; // our own buffer-flush, not a real error
         setLocalError('Stream unreachable — check the URL in Settings and that MPD is running');
         audioRef.current = null;
         setLocalPlaying(false);
       };
 
       audio.play().catch(err => {
-        // Ignore AbortErrors caused by our useEffect clearing the src to flush the buffer
-        if (err.name === 'AbortError') return;
-        
+        if (err?.name === 'AbortError') return; // also from our own reconnect
         setLocalError('Could not start audio: ' + (err?.message ?? 'unknown error'));
         audioRef.current = null;
         setLocalPlaying(false);
@@ -186,9 +181,9 @@ export function PlayerBar() {
       audioRef.current = audio;
       setLocalPlaying(true);
     }
-  }, [localPlaying, streamUrl]);
+  }, [localPlaying, streamUrl, isSameDevice]);
 
-  // Clean up when the component unmounts (page navigation / tab close)
+  // Clean up on unmount
   useEffect(() => {
     return () => {
       audioRef.current?.pause();
@@ -222,7 +217,6 @@ export function PlayerBar() {
         )}
 
         <div className="ctrl-row">
-          {/* Left: mode toggles + local audio */}
           <div className="side-btns">
             <Tooltip text="Shuffle (S)">
               <button
@@ -242,8 +236,6 @@ export function PlayerBar() {
                   onClick={toggleSingle}
               ><span className="btn-label-text">1</span></button>
             </Tooltip>
-
-            {/* Play audio through THIS browser's speakers via MPD's HTTP stream */}
             <Tooltip text={headphonesTooltip}>
               <button
                   className={`ctrl-btn toggle-btn${localPlaying ? ' active' : ''}`}
@@ -256,7 +248,6 @@ export function PlayerBar() {
             </Tooltip>
           </div>
 
-          {/* Centre: transport */}
           <div className="transport">
             <Tooltip text="Previous (←)">
               <button className="ctrl-btn nav-btn" onClick={previous}>
@@ -275,7 +266,6 @@ export function PlayerBar() {
             </Tooltip>
           </div>
 
-          {/* Right: volume */}
           <Volume />
         </div>
       </div>
