@@ -108,35 +108,36 @@ function Volume() {
 
 // ── PlayerBar ─────────────────────────────────────────────────────────────────
 
+type CalibState = 'idle' | 'stabilizing' | 'measuring' | 'applying' | 'done';
+
 export function PlayerBar() {
   const status    = useStore(s => s.status);
   const streamUrl = useStore(s => s.settings['stream.url'] ?? '');
 
-  const audioRef        = useRef<HTMLAudioElement | null>(null);
-  const [localPlaying, setLocalPlaying] = useState(false);
-  const [localError,   setLocalError]   = useState<string | null>(null);
-  
-  const reconnectingRef = useRef(false);
+  const audioRef         = useRef<HTMLAudioElement | null>(null);
+  const suppressErrorRef = useRef(false);   // guards onerror during ANY expected disconnect
+  const skipSeekRef      = useRef(false);   // suppresses canplay seek during calibration
+  const playStartRef     = useRef<number | null>(null);
 
-  const isSameDevice = (() => {
-    if (!streamUrl) return false;
-    try {
-      const u = new URL(/^https?:\/\//i.test(streamUrl)
-          ? streamUrl : 'http://' + streamUrl);
-      return u.hostname === 'localhost' || u.hostname === '127.0.0.1';
-    } catch { return false; }
-  })();
+  const [localPlaying,    setLocalPlaying]    = useState(false);
+  const [localError,      setLocalError]      = useState<string | null>(null);
+  const [calibState,      setCalibState]      = useState<CalibState>('idle');
+  const [measuredLatency, setMeasuredLatency] = useState<number | null>(null);
 
-  // ── Sync <audio> with MPD state ───────────────────────────────────────────
+  const isSameDevice =
+      window.location.hostname === 'localhost' ||
+      window.location.hostname === '127.0.0.1';
+
+  // ── Sync <audio> with MPD status ─────────────────────────────────────────
   useEffect(() => {
     if (!audioRef.current || !localPlaying) return;
     if (status.state === 'play') {
       if (audioRef.current.paused) {
-        reconnectingRef.current = true;
+        suppressErrorRef.current = true;
         const url = audioRef.current.src;
         audioRef.current.src = '';
         audioRef.current.src = url;
-        reconnectingRef.current = false;
+        suppressErrorRef.current = false;
         audioRef.current.play().catch(() => {});
       }
     } else {
@@ -144,65 +145,168 @@ export function PlayerBar() {
     }
   }, [status.state, localPlaying]);
 
+  // ── Audio element factory ─────────────────────────────────────────────────
+  const createAudio = useCallback((url: string, calibrating = false) => {
+    const audio = new Audio(url);
+    audio.volume = 1.0;
+
+    audio.addEventListener('canplay', () => {
+      if (skipSeekRef.current) return;
+      if (!audio.buffered.length) return;
+      const end = audio.buffered.end(audio.buffered.length - 1);
+      if (end - audio.currentTime > 1) audio.currentTime = end - 0.1;
+    }, { once: true });
+
+    audio.onerror = () => {
+      if (suppressErrorRef.current) return;
+      setLocalError('Stream unreachable — check the URL in Settings and that MPD is running');
+      audioRef.current?.pause();
+      audioRef.current = null;
+      setLocalPlaying(false);
+      setCalibState('idle');
+    };
+
+    if (calibrating) playStartRef.current = Date.now();
+
+    audio.play().catch(err => {
+      if (err?.name === 'AbortError') return;
+      if (suppressErrorRef.current) return;
+      setLocalError('Could not start audio: ' + (err?.message ?? 'unknown error'));
+      audioRef.current = null;
+      setLocalPlaying(false);
+    });
+
+    return audio;
+  }, []);
+
+  // ── Latency calibration ───────────────────────────────────────────────────
+
+  const runCalibration = useCallback((url: string) => {
+    skipSeekRef.current = true;
+    setCalibState('stabilizing');
+    setMeasuredLatency(null);
+    playStartRef.current = null;
+
+    audioRef.current = createAudio(url, /* calibrating */ true);
+    setLocalPlaying(true);
+
+    const stabilizeTimeout = setTimeout(() => {
+      setCalibState('measuring');
+      const samples: number[] = [];
+
+      const measureInterval = setInterval(() => {
+        if (!audioRef.current || !playStartRef.current) return;
+        const wallElapsed  = (Date.now() - playStartRef.current) / 1000;
+        const audioElapsed = audioRef.current.currentTime;
+        samples.push(wallElapsed - audioElapsed);
+
+        if (samples.length >= 5) {
+          clearInterval(measureInterval);
+          skipSeekRef.current = false;
+
+          const avg = samples.reduce((a, b) => a + b, 0) / samples.length;
+          const rounded = Math.round(avg * 10) / 10;
+
+          if (rounded < 0.3 || rounded > 15) {
+            setCalibState('idle');
+            setLocalError(
+                `Measurement came back as ${rounded}s, which isn't realistic — ` +
+                `something went wrong. Try disconnecting and reconnecting.`
+            );
+            return;
+          }
+
+          setMeasuredLatency(rounded);
+          setCalibState('applying');
+          suppressErrorRef.current = true;
+
+          fetch('/StatusServlet', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ action: 'calibrateSyncDelay', delaySeconds: rounded }),
+          }).then(() => {
+            setCalibState('done');
+            setTimeout(() => {
+              audioRef.current?.pause();
+              if (audioRef.current) audioRef.current.src = '';
+              audioRef.current = createAudio(url);   // plain reconnect, not calibrating again
+              suppressErrorRef.current = false;
+            }, 3000);
+          }).catch(() => {
+            suppressErrorRef.current = false;
+            setCalibState('idle');
+            setLocalError('Failed to apply sync delay — check server logs');
+          });
+        }
+      }, 1000);
+    }, 3000);
+
+    return () => { clearTimeout(stabilizeTimeout); skipSeekRef.current = false; };
+  }, [createAudio]);
+
   // ── Toggle local audio ────────────────────────────────────────────────────
   const toggleLocalAudio = useCallback(() => {
     if (!streamUrl || isSameDevice) return;
 
     if (localPlaying) {
       if (audioRef.current) {
+        suppressErrorRef.current = true;
         audioRef.current.pause();
         audioRef.current.src = '';
-        audioRef.current     = null;
+        suppressErrorRef.current = false;
+        audioRef.current = null;
       }
       setLocalPlaying(false);
       setLocalError(null);
+      setCalibState('idle');
     } else {
-      const url = /^https?:\/\//i.test(streamUrl)
-          ? streamUrl : 'http://' + streamUrl;
-
-      const audio = new Audio(url);
-      audio.volume = 1.0;
+      const url = /^https?:\/\//i.test(streamUrl) ? streamUrl : 'http://' + streamUrl;
       setLocalError(null);
-
-      audio.onerror = () => {
-        if (reconnectingRef.current) return; // our own buffer-flush, not a real error
-        setLocalError('Stream unreachable — check the URL in Settings and that MPD is running');
-        audioRef.current = null;
-        setLocalPlaying(false);
-      };
-
-      audio.play().catch(err => {
-        if (err?.name === 'AbortError') return; // also from our own reconnect
-        setLocalError('Could not start audio: ' + (err?.message ?? 'unknown error'));
-        audioRef.current = null;
-        setLocalPlaying(false);
-      });
-
-      audioRef.current = audio;
-      setLocalPlaying(true);
+      runCalibration(url);
     }
-  }, [localPlaying, streamUrl, isSameDevice]);
+  }, [localPlaying, streamUrl, isSameDevice, runCalibration]);
 
   // Clean up on unmount
   useEffect(() => {
     return () => {
+      suppressErrorRef.current = true;
       audioRef.current?.pause();
       audioRef.current = null;
     };
   }, []);
 
   const handlePlay = useCallback(async () => {
-    if      (status.state === 'play')  await pause();
-    else if (status.state === 'pause') await resume();
-    else                               await play();
-  }, [status.state]);
+    if (status.state === 'play') {
+      await pause();
+      audioRef.current?.pause();
+    } else if (status.state === 'pause') {
+      await resume();
+      if (audioRef.current && localPlaying) {
+        suppressErrorRef.current = true;
+        const url = audioRef.current.src;
+        audioRef.current.src = '';
+        audioRef.current.src = url;
+        suppressErrorRef.current = false;
+        audioRef.current.play().catch(() => {});
+      }
+    } else {
+      await play();
+    }
+  }, [status.state, localPlaying]);
 
   const playIcon = status.state === 'play' ? 'fa-pause' : 'fa-play';
   const headphonesTooltip = isSameDevice
       ? 'Already playing on this device — headphones mode is for remote listeners'
       : streamUrl
-          ? (localPlaying ? 'Stop playing on this device' : 'Play audio on this device')
+          ? (localPlaying ? 'Stop playing on this device' : 'Play on this device (auto-syncs with speakers)')
           : 'Set a Stream URL in Settings to enable this';
+
+  const calibLabel: Record<Exclude<CalibState, 'idle'>, string> = {
+    stabilizing: 'Connecting & buffering…',
+    measuring:   'Syncing with speakers…',
+    applying:    'Applying sync (MPD restarting)…',
+    done:        measuredLatency !== null ? `Synced (${measuredLatency}s delay)` : 'Synced',
+  };
 
   return (
       <div className="player-bar">
@@ -213,6 +317,15 @@ export function PlayerBar() {
               marginBottom: 2, padding: '0 16px' }}>
               <i className="fas fa-triangle-exclamation" style={{ marginRight: 5 }} />
               {localError}
+            </div>
+        )}
+
+        {localPlaying && calibState !== 'idle' && (
+            <div style={{ fontSize: 11, color: 'var(--text-sub)', textAlign: 'center',
+              marginBottom: 2, padding: '0 16px' }}>
+              <i className={`fas ${calibState === 'done' ? 'fa-check' : 'fa-spinner fa-spin'}`}
+                 style={{ marginRight: 5, color: calibState === 'done' ? '#4ade80' : 'var(--accent)' }} />
+              {calibLabel[calibState]}
             </div>
         )}
 
@@ -236,12 +349,13 @@ export function PlayerBar() {
                   onClick={toggleSingle}
               ><span className="btn-label-text">1</span></button>
             </Tooltip>
+
             <Tooltip text={headphonesTooltip}>
               <button
                   className={`ctrl-btn toggle-btn${localPlaying ? ' active' : ''}`}
                   onClick={toggleLocalAudio}
                   style={{ opacity: (streamUrl && !isSameDevice) ? 1 : 0.35 }}
-                  disabled={isSameDevice}
+                  disabled={isSameDevice || (calibState !== 'idle' && calibState !== 'done')}
               >
                 <i className="fas fa-headphones" />
               </button>
@@ -271,8 +385,6 @@ export function PlayerBar() {
       </div>
   );
 }
-
-// ── Util ──────────────────────────────────────────────────────────────────────
 
 function fmt(s: number): string {
   const sec = Math.floor(s) || 0;
