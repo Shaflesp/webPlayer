@@ -179,6 +179,32 @@ export function PlayerBar() {
     return audio;
   }, []);
 
+  // ── Reconnect with retry ──────────────────────────────────────────────────
+
+  const reconnectWithRetry = useCallback((url: string, attemptsLeft: number, delayMs: number) => {
+    suppressErrorRef.current = true;
+    audioRef.current?.pause();
+    if (audioRef.current) audioRef.current.src = '';
+
+    const probe = new Audio(url);
+    probe.addEventListener('canplay', () => {
+      // This attempt actually works — commit it as the real audio element.
+      suppressErrorRef.current = false;
+      audioRef.current = createAudio(url);
+    }, { once: true });
+
+    probe.addEventListener('error', () => {
+      if (attemptsLeft > 1) {
+        setTimeout(() => reconnectWithRetry(url, attemptsLeft - 1, delayMs), delayMs);
+      } else {
+        suppressErrorRef.current = false;
+        setLocalError('Sync was applied, but reconnecting afterward failed. Try clicking the headphones button again.');
+        setLocalPlaying(false);
+        setCalibState('idle');
+      }
+    }, { once: true });
+  }, [createAudio]);
+
   // ── Latency calibration ───────────────────────────────────────────────────
 
   const runCalibration = useCallback((url: string) => {
@@ -224,25 +250,30 @@ export function PlayerBar() {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ action: 'calibrateSyncDelay', delaySeconds: rounded }),
-          }).then(() => {
-            setCalibState('done');
-            setTimeout(() => {
-              audioRef.current?.pause();
-              if (audioRef.current) audioRef.current.src = '';
-              audioRef.current = createAudio(url);   // plain reconnect, not calibrating again
-              suppressErrorRef.current = false;
-            }, 3000);
-          }).catch(() => {
-            suppressErrorRef.current = false;
-            setCalibState('idle');
-            setLocalError('Failed to apply sync delay — check server logs');
-          });
+          })
+              .then(res => res.json())
+              .then((json: { ok: boolean; error?: string }) => {
+                if (!json.ok) {
+                  suppressErrorRef.current = false;
+                  setCalibState('idle');
+                  setLocalError(json.error ?? 'Failed to apply sync delay — check server logs');
+                  return;
+                }
+
+                setCalibState('done');
+                reconnectWithRetry(url, 4, 800);
+              })
+              .catch(() => {
+                suppressErrorRef.current = false;
+                setCalibState('idle');
+                setLocalError('Failed to apply sync delay — check server logs');
+              });
         }
       }, 1000);
     }, 3000);
 
     return () => { clearTimeout(stabilizeTimeout); skipSeekRef.current = false; };
-  }, [createAudio]);
+  }, [createAudio, reconnectWithRetry]);
 
   // ── Toggle local audio ────────────────────────────────────────────────────
   const toggleLocalAudio = useCallback(() => {
