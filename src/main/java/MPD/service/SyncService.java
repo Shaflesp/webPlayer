@@ -168,7 +168,7 @@ public class SyncService {
                     map.put(n, new String[]{ line.substring(firstComma + 1).trim(), "" });
                     continue;
                 }
-                
+
                 String u = line.substring(firstComma + 1, lastComma).trim();
                 String t = line.substring(lastComma + 1).trim();
                 map.put(n, new String[]{ u, t });
@@ -191,16 +191,73 @@ public class SyncService {
 
     // ── Browser detection ─────────────────────────────────────────────────────
 
-    private String detectBrowser() {
+    /**
+     * One (yt-dlp flag, candidate profile-root path) pair. Several distros
+     * and packaging formats place a browser's profile in a non-default
+     * location — e.g. some distros use ~/.config/mozilla/firefox instead of
+     * the usual ~/.mozilla/firefox, and sandboxed installs (Flatpak, Snap)
+     * use their own isolated home directory entirely. Trying multiple known
+     * candidates per browser, in priority order, covers this without
+     * requiring the user to do anything — see also settings key
+     * "yt.cookiesProfileOverride" for a manual escape hatch when none of
+     * these match.
+     */
+    private record BrowserCandidate(String flag, String path, boolean mozilla) {}
+
+    private static final List<BrowserCandidate> BROWSER_CANDIDATES;
+    static {
         String home = System.getProperty("user.home");
-        String z = findMozillaProfile("firefox",  home + "/.zen");                                   if (z != null) return z;
-        String f = findMozillaProfile("firefox",  home + "/.mozilla/firefox");                       if (f != null) return f;
-        String c = findChromiumProfile("chrome",  home + "/.config/google-chrome");                  if (c != null) return c;
-        String h = findChromiumProfile("chromium",home + "/.config/chromium");                       if (h != null) return h;
-        String b = findChromiumProfile("brave",   home + "/.config/BraveSoftware/Brave-Browser");    if (b != null) return b;
-        String e = findChromiumProfile("edge",    home + "/.config/microsoft-edge");                 if (e != null) return e;
-        String v = findChromiumProfile("vivaldi", home + "/.config/vivaldi");                        if (v != null) return v;
-        return findChromiumProfile("opera",   home + "/.config/opera");
+        BROWSER_CANDIDATES = List.of(
+                // Zen
+                new BrowserCandidate("firefox",  home + "/.zen",                                                        true),
+                new BrowserCandidate("firefox",  home + "/.config/zen",                                                 true),
+                new BrowserCandidate("firefox",  home + "/.var/app/app.zen_browser.zen/zen",                            true),
+                new BrowserCandidate("firefox",  home + "/.var/app/io.github.zen_browser.zen/zen",                      true),
+
+                // Firefox
+                new BrowserCandidate("firefox",  home + "/.mozilla/firefox",                                            true),
+                new BrowserCandidate("firefox",  home + "/.config/mozilla/firefox",                                     true),
+                new BrowserCandidate("firefox",  home + "/.var/app/org.mozilla.firefox/.mozilla/firefox",               true),
+                new BrowserCandidate("firefox",  home + "/snap/firefox/common/.mozilla/firefox",                        true),
+
+                // Waterfox
+                new BrowserCandidate("firefox",  home + "/.waterfox",                                                   true),
+                new BrowserCandidate("firefox",  home + "/.var/app/net.waterfox.waterfox/.waterfox",                    true),
+
+                // Chrome
+                new BrowserCandidate("chrome",   home + "/.config/google-chrome",                                       false),
+                new BrowserCandidate("chrome",   home + "/.var/app/com.google.Chrome/config/google-chrome",             false),
+
+                // Chromium
+                new BrowserCandidate("chromium", home + "/.config/chromium",                                            false),
+                new BrowserCandidate("chromium", home + "/.var/app/org.chromium.Chromium/config/chromium",              false),
+
+                // Brave
+                new BrowserCandidate("brave",    home + "/.config/BraveSoftware/Brave-Browser",                         false),
+                new BrowserCandidate("brave",    home + "/.var/app/com.brave.Browser/config/BraveSoftware/Brave-Browser", false),
+
+                // Edge, Vivaldi, Opera — standard locations only for now
+                new BrowserCandidate("edge",     home + "/.config/microsoft-edge",                                      false),
+                new BrowserCandidate("vivaldi",  home + "/.config/vivaldi",                                             false),
+                new BrowserCandidate("opera",    home + "/.config/opera",                                               false)
+        );
+    }
+
+    private String detectBrowser() {
+        // Manual override takes priority over auto-detection entirely — set
+        // in Settings when none of the paths below match your setup. Expected
+        // format is exactly what yt-dlp's --cookies-from-browser expects,
+        // e.g. "firefox:/home/you/.config/mozilla/firefox/abc123.default".
+        String override = settings.get("yt.cookiesProfileOverride");
+        if (override != null && !override.isBlank()) return override.trim();
+
+        for (BrowserCandidate c : BROWSER_CANDIDATES) {
+            String result = c.mozilla()
+                    ? findMozillaProfile(c.flag(), c.path())
+                    : findChromiumProfile(c.flag(), c.path());
+            if (result != null) return result;
+        }
+        return null;
     }
 
     private String findMozillaProfile(String flag, String basePath) {
@@ -234,7 +291,9 @@ public class SyncService {
             String browser  = detectBrowser();
 
             if (browser == null)
-                job.log("Warning: no browser found — downloading anonymously.");
+                job.log("Warning: no browser found — downloading anonymously. "
+                        + "If you have a browser installed, its profile may be in a location "
+                        + "not covered by auto-detection — see Settings → Cookies profile override.");
 
             // 1. Fetch playlist title
             job.log("Fetching playlist info…");
@@ -284,7 +343,7 @@ public class SyncService {
             }
             int exit = proc.waitFor();
             boolean producedOutput = job.lineCount() > linesBefore;
-            
+
             job.ok = (exit == 0) || producedOutput;
 
             if (!job.ok) {

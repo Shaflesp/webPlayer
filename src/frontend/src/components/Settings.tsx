@@ -50,6 +50,7 @@ export function Settings() {
   const [vizMode,   setVizMode]   = useState<VizMode>('ellipse');
   const [fifoPath,  setFifoPath]  = useState('/tmp/mpd.fifo');
   const [streamUrl, setStreamUrl] = useState('');
+  const [cookiesOverride, setCookiesOverride] = useState('');
 
   // Populate form from store when panel opens
   useEffect(() => {
@@ -67,6 +68,7 @@ export function Settings() {
       setVizMode((s['visualizer.mode'] ?? 'ellipse') as VizMode);
       setFifoPath(s['fifo.path']       ?? '/tmp/mpd.fifo');
       setStreamUrl(s['stream.url']     ?? '');
+      setCookiesOverride(s['yt.cookiesProfileOverride'] ?? '');
     });
   }, [open]);
 
@@ -147,6 +149,16 @@ export function Settings() {
             <div className="settings-field">
               <label>Music directory</label>
               <input type="text" value={musicDir} onChange={e => setMusicDir(e.target.value)} placeholder="~/Music" />
+            </div>
+            <div className="settings-field">
+              <label>Cookies profile override</label>
+              <input
+                  type="text"
+                  value={cookiesOverride}
+                  onChange={e => setCookiesOverride(e.target.value)}
+                  onBlur={e => persist({ 'yt.cookiesProfileOverride': e.target.value })}
+                  placeholder="firefox:/home/you/.config/mozilla/firefox/abc123.default"
+              />
             </div>
             <div className="settings-actions">
               <button className="btn-secondary" onClick={saveConn}>

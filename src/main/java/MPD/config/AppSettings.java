@@ -31,7 +31,7 @@ public class AppSettings {
         DEFAULTS.setProperty("stream.url",          "");
         DEFAULTS.setProperty("visualizer.mode",     "ellipse");
         DEFAULTS.setProperty("fifo.path",           "/tmp/mpd.fifo");
-        DEFAULTS.setProperty("yt.cookiesFile",      "");
+        DEFAULTS.setProperty("yt.cookiesProfileOverride", "");
     }
     
     private Path file = DEFAULT_FILE;
