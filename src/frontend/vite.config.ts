@@ -1,3 +1,4 @@
+/// <reference types="vitest/config" />
 import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
 
@@ -23,5 +24,12 @@ export default defineConfig({
       // SSE needs the connection to stay open
       '/FifoServlet':   { target: TOMCAT, changeOrigin: true, ws: false },
     },
+  },
+
+  test: {
+    environment: 'jsdom',       
+    globals: true,               
+    setupFiles: ['./src/test/setup.ts'],
+    css: false,
   },
 });

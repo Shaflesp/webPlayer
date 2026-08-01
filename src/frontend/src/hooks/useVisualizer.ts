@@ -7,7 +7,7 @@ function hexToRgb(hex: string): [number, number, number] {
   return [(n >> 16) & 255, (n >> 8) & 255, n & 255];
 }
 
-function resample(src: Float32Array, N: number): Float32Array {
+export function resample(src: Float32Array, N: number): Float32Array {
   const out = new Float32Array(N);
   for (let i = 0; i < N; i++) {
     const pos = (i / (N - 1)) * (src.length - 1);
@@ -24,7 +24,7 @@ function resample(src: Float32Array, N: number): Float32Array {
  * quiet) at the 12-o'clock seam, creating a hard jump. Mirroring makes both
  * ends of the array meet at the same value so the ring is seamless.
  */
-function mirrorSpectrum(half: Float32Array): Float32Array {
+export function mirrorSpectrum(half: Float32Array): Float32Array {
   const N   = half.length * 2;
   const out = new Float32Array(N);
   for (let i = 0; i < half.length; i++) {
@@ -43,8 +43,8 @@ function mirrorSpectrum(half: Float32Array): Float32Array {
  * increasing toward the treble end, purely to make the shape read as
  * balanced and lively. It has nothing to do with acoustic accuracy.
  */
-const TREBLE_BOOST = 0.6;   // treble bins get up to (1 + TREBLE_BOOST)x gain
-function boostTreble(spectrum: Float32Array): Float32Array {
+export const TREBLE_BOOST = 0.6;   // treble bins get up to (1 + TREBLE_BOOST)x gain
+export function boostTreble(spectrum: Float32Array): Float32Array {
   const M = spectrum.length;
   const out = new Float32Array(M);
   for (let i = 0; i < M; i++) {
@@ -70,16 +70,16 @@ function boostTreble(spectrum: Float32Array): Float32Array {
  * Lower value (e.g. 1.0)  → more sensitive, maxes out easily, "fuller" look.
  * Higher value (e.g. 2.5) → less sensitive, more headroom, more spiky/varied.
  */
-const SENSITIVITY = 2.5;
-function applySensitivity(spectrum: Float32Array): Float32Array {
+export const SENSITIVITY = 2.5;
+export function applySensitivity(spectrum: Float32Array): Float32Array {
   const out = new Float32Array(spectrum.length);
   for (let i = 0; i < spectrum.length; i++) out[i] = spectrum[i] / SENSITIVITY;
   return out;
 }
 
 // Asymmetric envelope: fast attack (responsive), slow release (smooth decay)
-const ATTACK = 0.40, RELEASE = 0.14;
-function smoothTowards(cur: Float32Array, tgt: Float32Array) {
+export const ATTACK = 0.40, RELEASE = 0.14;
+export function smoothTowards(cur: Float32Array, tgt: Float32Array) {
   for (let i = 0; i < cur.length; i++) {
     const t = tgt[i];
     // Defensive: never let a bad value corrupt the persistent buffer. Without
