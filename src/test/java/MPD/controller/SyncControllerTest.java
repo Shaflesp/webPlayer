@@ -76,10 +76,6 @@ class SyncControllerTest {
 
     @Test
     void updateMpd_whenMpdCommandThrows_stillReturnsHttp200WithOkFalse() throws Exception {
-        // CRITICAL contract test: the frontend only works correctly if this
-        // endpoint always returns HTTP 200 and puts the real result in the
-        // `ok` field — a caller that only checks fetch() resolving (rather
-        // than parsing this field) would wrongly treat this as success.
         doThrow(new RuntimeException("MPD unreachable")).when(mpdService).command("update");
 
         mockMvc.perform(post("/SyncServlet")
@@ -103,8 +99,6 @@ class SyncControllerTest {
     @Test
     void stream_withNullJobId_completesImmediatelyWithoutError() {
         Object result = syncController.get("stream", null);
-        // Just needs to not throw and return a usable emitter — the job==null
-        // early-return path in the private stream() method.
         assertInstanceOf(SseEmitter.class, result);
     }
 
