@@ -21,7 +21,8 @@ It's built to be genuinely easy to install: `./install.sh` detects your distro, 
 
 ## Screenshots
 
-*WIP*
+<img src="./screenshots/circle.png" width="500">
+<img src="./screenshots/bar.png" width="500">
 
 ---
 
