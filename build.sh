@@ -3,10 +3,10 @@
 # WebPlayer build script
 #
 # Usage:
-#   ./build.sh              → fat JAR only        (target/webplayer-0.1.0.jar)
+#   ./build.sh              → fat JAR only        (target/webplayer-1.0.0.jar)
 #   ./build.sh --app        → + jpackage app image (target/dist/WebPlayer/)
 #   ./build.sh --release    → + release tarball with installer
-#                              (target/release/webplayer-0.1.0-linux-x64.tar.gz)
+#                              (target/release/webplayer-1.0.0-linux-x64.tar.gz)
 #
 # The fat JAR already contains:
 #   • The React frontend (built from src/frontend/)
@@ -63,7 +63,7 @@ fi
 echo ""
 echo "▶ Building fat JAR…"
 mvn package -DskipTests -q
-JAR_PATH="target/webplayer-0.1.0.jar"
+JAR_PATH="target/webplayer-1.0.0.jar"
 echo "  ✓ JAR built → $JAR_PATH"
 
 if [[ "$MODE" == "jar" ]]; then
@@ -105,7 +105,7 @@ fi
 echo ""
 echo "▶ Assembling release bundle…"
 
-RELEASE_NAME="webplayer-0.1.0-linux-x64"
+RELEASE_NAME="webplayer-1.0.0-linux-x64"
 RELEASE_DIR="target/release/$RELEASE_NAME"
 
 rm -rf "target/release"

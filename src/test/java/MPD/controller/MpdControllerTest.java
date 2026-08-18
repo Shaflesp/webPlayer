@@ -194,7 +194,7 @@ class MpdControllerTest {
         mockMvc.perform(post("/MPDServlet")
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("{\"action\":\"not_a_real_action\"}"))
-            .andExpect(status().is5xxServerError());
+            .andExpect(status().isBadRequest());
     }
 
     // ── GET endpoints ─────────────────────────────────────────────────────────
@@ -235,6 +235,7 @@ class MpdControllerTest {
             .andExpect(status().isOk())
             .andExpect(content().json("[]"));
 
-        verifyNoInteractions(client);
+        verify(client).close();
+        verifyNoMoreInteractions(client);
     }
 }

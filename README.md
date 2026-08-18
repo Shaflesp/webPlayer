@@ -30,8 +30,8 @@ It's built to be genuinely easy to install: `./install.sh` detects your distro, 
 If you just want to run WebPlayer and not build it yourself, grab the latest release tarball from the [Releases](https://github.com/Shaflesp/webPlayer/releases) page (or build one yourself — see below), then:
 
 ```bash
-tar xzf webplayer-0.1.0-linux-x64.tar.gz
-cd webplayer-0.1.0-linux-x64
+tar xzf webplayer-1.0.0-linux-x64.tar.gz
+cd webplayer-1.0.0-linux-x64
 ./install.sh
 ```
 
@@ -66,9 +66,9 @@ Currently **Linux-only** — see [Limitations](#known-limitations) below.
 ```bash
 git clone https://github.com/Shaflesp/webPlayer.git
 cd webPlayer
-./build.sh              # fat JAR only        → target/webplayer-0.1.0.jar
+./build.sh              # fat JAR only        → target/webplayer-1.0.0.jar
 ./build.sh --app        # + jpackage app image → target/dist/WebPlayer/  (bundles its own JRE, no Java needed to run it)
-./build.sh --release    # + release tarball    → target/release/webplayer-0.1.0-linux-x64.tar.gz  (the installable bundle described above)
+./build.sh --release    # + release tarball    → target/release/webplayer-1.0.0-linux-x64.tar.gz  (the installable bundle described above)
 ```
 
 The fat JAR already contains the built React frontend and a bundled `yt-dlp` binary (downloaded once and cached on subsequent builds).
@@ -76,7 +76,7 @@ The fat JAR already contains the built React frontend and a bundled `yt-dlp` bin
 ### Running without installing
 
 ```bash
-java -jar target/webplayer-0.1.0.jar
+java -jar target/webplayer-1.0.0.jar
 ```
 
 You'll still need MPD and ffmpeg installed and MPD configured with a FIFO output (see `install.sh`'s generated `mpd.conf` for the exact block, or just run the installer — it's safe to run against a dev build too).

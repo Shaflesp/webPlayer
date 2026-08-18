@@ -14,7 +14,7 @@
 
     <groupId>dev.webplayer</groupId>
     <artifactId>webplayer</artifactId>
-    <version>0.1.0</version>
+    <version>1.0.0</version>
     <packaging>jar</packaging>
 
     <properties>

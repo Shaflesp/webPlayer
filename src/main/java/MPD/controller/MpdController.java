@@ -39,6 +39,10 @@ public class MpdController {
                 default              -> throw new IllegalArgumentException("Unknown action: " + action);
             };
             return ResponseEntity.ok(result);
+        } catch (IllegalArgumentException e) {
+            JsonObject err = new JsonObject();
+            err.addProperty("error", e.getMessage());
+            return ResponseEntity.badRequest().body(err);
         }
     }
 
@@ -95,6 +99,8 @@ public class MpdController {
                 default -> throw new IllegalArgumentException("Unknown action: " + action);
             }
             return ResponseEntity.ok(Map.of("ok", true));
+        } catch (IllegalArgumentException e) {
+            return ResponseEntity.badRequest().body(Map.of("error", e.getMessage()));
         }
     }
 

@@ -27,7 +27,7 @@ else
     BOLD=''; DIM=''; NC=''; RED=''; GREEN=''; YELLOW=''; CYAN=''; WHITE=''; BLUE=''
 fi
 
-VERSION="0.1.0"
+VERSION="1.0.0"
 TOTAL_STEPS=7
 
 INSTALL_DIR="$HOME/.local/share/webplayer"
